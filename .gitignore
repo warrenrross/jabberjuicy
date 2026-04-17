@@ -1,0 +1,32 @@
+# ─── Credentials ─────────────────────────────────────────────
+appsettings.Development.json
+appsettings.*.json
+!appsettings.json
+
+# ─── Course deliverables (not part of the app) ───────────────
+*.docx
+*.xlsx
+*.pptx
+*.drawio
+Conceptual Design.drawio.png
+sample_*.png
+sample _ERD.png
+
+# ─── Claude Code settings ────────────────────────────────────
+.claude/
+
+# ─── Build output ────────────────────────────────────────────
+bin/
+obj/
+
+# ─── Visual Studio ───────────────────────────────────────────
+.vs/
+*.user
+*.suo
+
+# ─── OS ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Office temp files ───────────────────────────────────────
+~$*

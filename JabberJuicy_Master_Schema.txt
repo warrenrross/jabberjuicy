@@ -1,0 +1,148 @@
+/* ============================================================
+   JabberJuicy_Master_Schema.txt
+   JabberJuicy Juice Bar — Echo Team
+   DASC Data Management, Spring 2026
+
+   NOTE: All PKs are IDENTITY(1,1) INT — do NOT specify ID values
+   on INSERT; SQL Server assigns them automatically.
+   ============================================================ */
+
+
+-- ─── CLEAN SLATE ─────────────────────────────────────────────
+-- Run in this order to respect FK dependencies
+
+DROP TABLE IF EXISTS OrderItem;
+DROP TABLE IF EXISTS [Order];
+DROP TABLE IF EXISTS Customer;
+DROP TABLE IF EXISTS Item;
+DROP TABLE IF EXISTS Location;
+DROP TABLE IF EXISTS PaymentType;
+
+
+-- ─── CUSTOMER ─────────────────────────────────────────────────
+
+CREATE TABLE Customer (
+    CustomerID       INT          IDENTITY(1,1) PRIMARY KEY,
+    CUS_LastName     VARCHAR(30)  NOT NULL,
+    CUS_FirstName    VARCHAR(30)  NOT NULL,
+    CUS_Username     VARCHAR(30)  NOT NULL UNIQUE,
+    CUS_PasswordHash VARCHAR(255) NOT NULL,
+    CUS_Email        VARCHAR(50),
+    CUS_Phone        CHAR(10),
+    CUS_Address      VARCHAR(100),
+    CUS_City         VARCHAR(50),
+    CUS_State        CHAR(2),
+    CUS_ZipCode      CHAR(5)
+);
+
+
+-- ─── ITEM ─────────────────────────────────────────────────────
+
+CREATE TABLE Item (
+    ItemID          INT           IDENTITY(1,1) PRIMARY KEY,
+    ITM_ItemName    VARCHAR(100)  NOT NULL,
+    ITM_Description VARCHAR(200),
+    ITM_Category    VARCHAR(50),
+    ITM_UnitPrice   DECIMAL(10,2) NOT NULL,
+    ITM_StockQty    INT
+);
+
+
+-- ─── LOCATION ─────────────────────────────────────────────────
+
+CREATE TABLE Location (
+    LocationID    INT         IDENTITY(1,1) PRIMARY KEY,
+    LOC_StoreName VARCHAR(100) NOT NULL,
+    LOC_Address   VARCHAR(100),
+    LOC_City      VARCHAR(50),
+    LOC_State     CHAR(2),
+    LOC_ZipCode   CHAR(5),
+    LOC_Phone     CHAR(10),
+    LOC_Manager   VARCHAR(60)
+);
+
+
+-- ─── PAYMENT TYPE ─────────────────────────────────────────────
+
+CREATE TABLE PaymentType (
+    PaymentTypeID   INT         IDENTITY(1,1) PRIMARY KEY,
+    PAY_TypeName    VARCHAR(30) NOT NULL,
+    PAY_Description VARCHAR(100)
+);
+
+
+-- ─── ORDER ────────────────────────────────────────────────────
+
+CREATE TABLE [Order] (
+    OrderID         INT           IDENTITY(1,1) PRIMARY KEY,
+    ORD_OrderDate   DATETIME      DEFAULT GETDATE(),
+    ORD_Status      VARCHAR(20),
+    ORD_Notes       VARCHAR(300),
+    ORD_TotalAmount DECIMAL(10,2),
+
+    CustomerID    INT NOT NULL,
+    LocationID    INT NOT NULL,
+    PaymentTypeID INT NOT NULL,
+
+    CONSTRAINT FK_Order_Customer    FOREIGN KEY (CustomerID)    REFERENCES Customer(CustomerID),
+    CONSTRAINT FK_Order_Location    FOREIGN KEY (LocationID)    REFERENCES Location(LocationID),
+    CONSTRAINT FK_Order_PaymentType FOREIGN KEY (PaymentTypeID) REFERENCES PaymentType(PaymentTypeID)
+);
+
+
+-- ─── ORDER ITEM (bridge) ──────────────────────────────────────
+-- ORI_Subtotal is a computed column (Quantity × UnitPrice)
+
+CREATE TABLE OrderItem (
+    OrderItemID   INT           IDENTITY(1,1) PRIMARY KEY,
+    OrderID       INT           NOT NULL,
+    ItemID        INT           NOT NULL,
+    ORI_Quantity  INT           NOT NULL,
+    ORI_UnitPrice DECIMAL(10,2) NOT NULL,
+    ORI_Subtotal  AS (ORI_Quantity * ORI_UnitPrice),
+
+    CONSTRAINT FK_OI_Order FOREIGN KEY (OrderID) REFERENCES [Order](OrderID),
+    CONSTRAINT FK_OI_Item  FOREIGN KEY (ItemID)  REFERENCES Item(ItemID)
+);
+
+
+-- ─── SEED DATA: LOCATION ──────────────────────────────────────
+
+INSERT INTO Location (LOC_StoreName, LOC_Address, LOC_City, LOC_State, LOC_ZipCode) VALUES
+    ('UofA Campus',  '123 Tulgey Lane',    'Fayetteville', 'AR', '72701'),
+    ('Silicon Hills', '456 Vorpal Blvd',   'Austin',       'TX', '78759'),
+    ('City of Roses', '789 Frabjous Ave',  'Portland',     'OR', '97201'),
+    ('Ocean Beach',   '321 Borogove Blvd', 'San Diego',    'CA', '92107');
+
+
+-- ─── SEED DATA: PAYMENT TYPE ──────────────────────────────────
+
+INSERT INTO PaymentType (PAY_TypeName, PAY_Description) VALUES
+    ('Cash',        'Pay with physical currency'),
+    ('Credit Card', 'Visa, Mastercard, Amex, Discover'),
+    ('Debit Card',  'Bank debit card');
+
+
+-- ─── SEED DATA: ITEM ──────────────────────────────────────────
+
+INSERT INTO Item (ITM_ItemName, ITM_Description, ITM_Category, ITM_UnitPrice, ITM_StockQty) VALUES
+    ('Brillig Blend',       'Golden sunset-hued juice — mysterious and twilight-smooth',        'Juice',    6.50, 50),
+    ('Slithy Smoothie',     'Silky blended drink with mango, banana, and coconut milk',         'Smoothie', 7.25, 50),
+    ('Borogove Green',      'Whimsical veggie juice — kale, cucumber, green apple, ginger',     'Juice',    6.75, 50),
+    ('Mimsy Morning',       'Delicate floral blend with hibiscus, rose, and lychee',            'Juice',    6.50, 50),
+    ('Uffish Berry',        'Bold, dark berry blast — blackberry, blueberry, acai',             'Smoothie', 7.50, 50),
+    ('Tulgey Greens',       'Thick, deep jungle green — spinach, spirulina, pineapple',        'Smoothie', 7.75, 50),
+    ('Frabjous Signature',  'Our house juice — the celebratory blend you must try',            'Special',  8.50, 50),
+    ('Galumphing Gulp',     'Hearty, chunky smoothie — oats, peanut butter, banana, honey',   'Smoothie', 8.00, 50),
+    ('Beamish Citrus',      'Bright sunshine citrus — orange, pineapple, turmeric, lemon',    'Juice',    6.25, 50),
+    ('Vorpal Zing',         'Sharp and zingy — ginger, apple, lemon, cayenne',                'Juice',    6.00, 50),
+    ('Burble Fizz',         'Sparkling bubbly drink — kombucha base with berry burst',        'Special',  7.00, 50),
+    ('Whiffling Mint',      'Refreshing cucumber, mint, lime, and coconut water',             'Juice',    6.25, 50),
+    ('Snicker-Snack Apple', 'Crisp and sharp — apple, celery, lemon, ginger',                'Juice',    5.75, 50);
+
+
+-- ─── VERIFY ───────────────────────────────────────────────────
+
+SELECT * FROM Location     ORDER BY LocationID;
+SELECT * FROM PaymentType  ORDER BY PaymentTypeID;
+SELECT * FROM Item         ORDER BY ITM_Category, ITM_ItemName;
