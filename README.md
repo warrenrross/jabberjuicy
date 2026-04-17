@@ -77,12 +77,24 @@ Without this file the app will start but all database calls will fail.
 
 1. Push this repo to GitHub
 2. New project on [railway.app](https://railway.app) → Deploy from GitHub
-3. Railway auto-detects .NET 10 and builds
-4. Add environment variable in Railway → Variables:
+3. **Set the Root Directory** — Railway's build tool scans the repo root and will fail to detect .NET if you skip this step. Go to your service → **Settings** → **Source** → **Root Directory** and set it to:
    ```
-   ConnectionStrings__JabberJuicy = <full connection string>
+   WebAppWithDB_Starter_v2/WebAppWithDB_Starter_v2
    ```
-5. Add custom domain under Settings → Domains
+4. **Set the environment variable** — Railway cannot read `appsettings.Development.json` (it's gitignored). Go to your service → **Variables** tab and add:
+   ```
+   Name:  ConnectionStrings__JabberJuicy
+   Value: Data Source=YOUR_SERVER;Initial Catalog=YOUR_DB;User Id=YOUR_USER;Password=YOUR_PASS;TrustServerCertificate=True;
+   ```
+   The double underscore `__` is how .NET maps environment variables to nested config keys. Without this the app will start but all database calls will fail.
+5. Add custom domain under **Settings** → **Networking** → **Generate Domain** (for a free `*.up.railway.app` URL) or **Custom Domain** to use your own.
+
+**Pointing a Hostinger domain at Railway:**
+- In Hostinger hPanel → Domains → DNS Records, add:
+  - CNAME `www` → `your-app.up.railway.app`
+  - CNAME `@` → `your-app.up.railway.app`
+- Add both `yourdomain.com` and `www.yourdomain.com` under Railway → Settings → Networking → Custom Domain
+- DNS propagation takes 5–30 minutes. If the apex (`@`) CNAME doesn't resolve, try replacing it with an A record or use Cloudflare as your DNS provider (supports CNAME flattening on apex domains).
 
 ---
 

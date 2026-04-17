@@ -3,6 +3,10 @@ appsettings.Development.json
 appsettings.*.json
 !appsettings.json
 
+# ─── Local notes (not for public repo) ──────────────────────
+PROGRESS.md
+TODO.md
+
 # ─── Course deliverables (not part of the app) ───────────────
 *.docx
 *.xlsx
