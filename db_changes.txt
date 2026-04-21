@@ -34,3 +34,37 @@ VALUES ('Ocean Beach', '321 Borogove Blvd', 'San Diego', 'CA');
 
 -- Verify final state
 SELECT * FROM Location ORDER BY LocationID;
+
+-- ============================================================
+-- JabberWonk Points — Phase 3 feature addition
+-- Run in SSMS against DASC_1_Spring2026_Shipp_TeamEcho
+-- Date: 2026-04-21
+-- ============================================================
+
+-- 1. Add points balance column to existing Customer rows (DEFAULT 0 applies automatically)
+ALTER TABLE Customer
+    ADD CUS_PointsBalance INT NOT NULL DEFAULT 0;
+
+-- 2. Add JabberWonk Points as 4th payment method
+INSERT INTO PaymentType (PAY_TypeName, PAY_Description)
+VALUES ('JabberWonk Points', 'Redeem loyalty points — 100 pts = $1.00');
+
+-- 3. Create points audit log table
+CREATE TABLE JabberWonkTransaction (
+    JabberWonkTransactionID INT          IDENTITY(1,1) PRIMARY KEY,
+    JWT_TransactionDate     DATETIME     NOT NULL DEFAULT GETDATE(),
+    JWT_PointsDelta         INT          NOT NULL,
+    JWT_TransactionType     VARCHAR(20)  NOT NULL,  -- 'EARN' | 'REDEEM'
+    JWT_BalanceAfter        INT          NOT NULL,
+    JWT_Notes               VARCHAR(100),
+    CustomerID              INT          NOT NULL,
+    OrderID                 INT          NOT NULL,
+    CONSTRAINT FK_JWT_Customer FOREIGN KEY (CustomerID) REFERENCES Customer(CustomerID),
+    CONSTRAINT FK_JWT_Order    FOREIGN KEY (OrderID)    REFERENCES [Order](OrderID)
+);
+
+-- Verify
+SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'Customer' ORDER BY ORDINAL_POSITION;
+SELECT * FROM PaymentType ORDER BY PaymentTypeID;
+SELECT * FROM JabberWonkTransaction;

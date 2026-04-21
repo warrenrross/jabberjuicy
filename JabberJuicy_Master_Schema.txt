@@ -11,6 +11,7 @@
 -- ─── CLEAN SLATE ─────────────────────────────────────────────
 -- Run in this order to respect FK dependencies
 
+DROP TABLE IF EXISTS JabberWonkTransaction;
 DROP TABLE IF EXISTS OrderItem;
 DROP TABLE IF EXISTS [Order];
 DROP TABLE IF EXISTS Customer;
@@ -32,7 +33,8 @@ CREATE TABLE Customer (
     CUS_Address      VARCHAR(100),
     CUS_City         VARCHAR(50),
     CUS_State        CHAR(2),
-    CUS_ZipCode      CHAR(5)
+    CUS_ZipCode       CHAR(5),
+    CUS_PointsBalance INT NOT NULL DEFAULT 0   -- JabberWonk Points loyalty balance
 );
 
 
@@ -106,6 +108,24 @@ CREATE TABLE OrderItem (
 );
 
 
+-- ─── JABBERWONK TRANSACTION (points audit log) ───────────────
+-- JWT_ prefix follows project naming convention
+-- JWT_PointsDelta: positive = earn, negative = redeem
+
+CREATE TABLE JabberWonkTransaction (
+    JabberWonkTransactionID INT          IDENTITY(1,1) PRIMARY KEY,
+    JWT_TransactionDate     DATETIME     NOT NULL DEFAULT GETDATE(),
+    JWT_PointsDelta         INT          NOT NULL,
+    JWT_TransactionType     VARCHAR(20)  NOT NULL,  -- 'EARN' | 'REDEEM'
+    JWT_BalanceAfter        INT          NOT NULL,
+    JWT_Notes               VARCHAR(100),
+    CustomerID              INT          NOT NULL,
+    OrderID                 INT          NOT NULL,
+    CONSTRAINT FK_JWT_Customer FOREIGN KEY (CustomerID) REFERENCES Customer(CustomerID),
+    CONSTRAINT FK_JWT_Order    FOREIGN KEY (OrderID)    REFERENCES [Order](OrderID)
+);
+
+
 -- ─── SEED DATA: LOCATION ──────────────────────────────────────
 
 INSERT INTO Location (LOC_StoreName, LOC_Address, LOC_City, LOC_State, LOC_ZipCode) VALUES
@@ -118,9 +138,10 @@ INSERT INTO Location (LOC_StoreName, LOC_Address, LOC_City, LOC_State, LOC_ZipCo
 -- ─── SEED DATA: PAYMENT TYPE ──────────────────────────────────
 
 INSERT INTO PaymentType (PAY_TypeName, PAY_Description) VALUES
-    ('Cash',        'Pay with physical currency'),
-    ('Credit Card', 'Visa, Mastercard, Amex, Discover'),
-    ('Debit Card',  'Bank debit card');
+    ('Cash',               'Pay with physical currency'),
+    ('Credit Card',        'Visa, Mastercard, Amex, Discover'),
+    ('Debit Card',         'Bank debit card'),
+    ('JabberWonk Points',  'Redeem loyalty points — 100 pts = $1.00');
 
 
 -- ─── SEED DATA: ITEM ──────────────────────────────────────────

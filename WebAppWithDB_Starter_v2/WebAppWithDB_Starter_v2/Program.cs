@@ -14,6 +14,11 @@ namespace WebAppWithDB_Starter_v2
         // ─── Cart item: stored in session as JSON ─────────────────────────────
         private record CartItem(int ItemID, string Name, decimal UnitPrice, int Quantity);
 
+        // ─── JabberWonk Points constants ──────────────────────────────────────
+        private const int JWP_PointsPerVisit   = 50;   // flat bonus per qualifying order
+        private const int JWP_PointsPerDollar  = 10;   // pts per whole dollar spent
+        private const int JWP_PointsPerRedempt = 100;  // pts required to redeem $1.00
+
         // ─────────────────────────────────────────────────────────────────────
         public static void Main(string[] args)
         {
@@ -78,6 +83,13 @@ namespace WebAppWithDB_Starter_v2
             app.MapGet("/receipt",      HandleReceipt);
             app.MapGet("/history",      HandleHistory);
             app.MapGet("/error",        HandleError);
+            app.MapGet("/account",          HandleAccountGet);
+            app.MapPost("/account",         HandleAccountPost);
+            app.MapGet("/account/success",  HandleAccountSuccess);
+            app.MapGet("/pickup",                        HandlePickupIndex);
+            app.MapGet("/pickup/{orderId:int}",          HandlePickupOrder);
+            app.MapPost("/pickup/{orderId:int}/confirm", HandlePickupConfirm);
+            app.MapPost("/pickup/{orderId:int}/cancel",  HandlePickupCancel);
         }
 
         // ─── LAYOUT HELPERS ──────────────────────────────────────────────────
@@ -109,13 +121,34 @@ namespace WebAppWithDB_Starter_v2
 </body>
 </html>";
 
-        private static string NavBar(string? username)
+        private static string NavBar(string? username, int? pointsBalance = null, int pendingCount = 0)
         {
+            string pointsBadge = (username != null && pointsBalance.HasValue)
+                ? $"<li class='nav-item'><span class='navbar-text ms-1'>" +
+                  $"<span class='badge rounded-pill' style='background:#fbbf24;color:#1a1a1a;'>" +
+                  $"&#11088; {pointsBalance.Value:N0} pts</span></span></li>"
+                : "";
+            string pickupBadge = (username != null && pendingCount > 0)
+                ? "<li class='nav-item'><a class='nav-link px-2' href='/pickup'>" +
+                  "<span class='badge bg-success px-3 py-2'>" +
+                  (pendingCount == 1 ? "&#x1F7E2; Pickup Ready" : $"&#x1F7E2; {pendingCount} Pickups Ready") +
+                  "</span></a></li>"
+                : "";
             string authLinks = username != null
                 ? $@"<li class='nav-item'><a class='nav-link text-white' href='/menu'>Menu</a></li>
                      <li class='nav-item'><a class='nav-link text-white' href='/order'>New Order</a></li>
-                     <li class='nav-item'><a class='nav-link text-white' href='/history'>My Orders</a></li>
-                     <li class='nav-item'><span class='nav-link fw-semibold' style='color:#fde68a;'>Hi, {H(username)}!</span></li>
+                     {pickupBadge}
+                     <li class='nav-item dropdown'>
+                       <a class='nav-link dropdown-toggle fw-semibold' style='color:#fde68a;'
+                          href='#' role='button' data-bs-toggle='dropdown' aria-expanded='false'>
+                         Hi, {H(username)}!
+                       </a>
+                       <ul class='dropdown-menu dropdown-menu-end'>
+                         <li><a class='dropdown-item' href='/account'>Change Username</a></li>
+                         <li><a class='dropdown-item' href='/history'>View Orders</a></li>
+                       </ul>
+                     </li>
+                     {pointsBadge}
                      <li class='nav-item'><a class='nav-link text-white' href='/logout'>Logout</a></li>"
                 : @"<li class='nav-item'><a class='nav-link text-white' href='/menu'>Menu</a></li>
                     <li class='nav-item'><a class='nav-link text-white' href='/login'>Login</a></li>
@@ -139,8 +172,8 @@ namespace WebAppWithDB_Starter_v2
 </nav>";
         }
 
-        private static string Layout(string title, string? username, string body)
-            => PageHead(title) + NavBar(username) + body + PageFoot();
+        private static string Layout(string title, string? username, string body, int? points = null, int pendingCount = 0)
+            => PageHead(title) + NavBar(username, points, pendingCount) + body + PageFoot();
 
         // HTML-encode helper (shorthand)
         private static string H(string? s) => WebUtility.HtmlEncode(s ?? "");
@@ -181,6 +214,43 @@ namespace WebAppWithDB_Starter_v2
 
         private static string? GetCurrentUsername(HttpContext ctx) =>
             ctx.Session.GetString("uname");
+
+        private static async Task<bool> UsernameExistsAsync(string username, ILogger? logger = null)
+        {
+            var cmd = new SqlCommand("SELECT COUNT(1) FROM Customer WHERE CUS_Username = @u");
+            cmd.Parameters.AddWithValue("@u", username);
+            var dt = await FillDataTableViaCommandAsync(cmd, logger);
+            return dt != null && Convert.ToInt32(dt.Rows[0][0]) > 0;
+        }
+
+        private static async Task<int> GetPointsBalanceAsync(int customerId, ILogger? logger = null)
+        {
+            var cmd = new SqlCommand("SELECT CUS_PointsBalance FROM Customer WHERE CustomerID = @id");
+            cmd.Parameters.AddWithValue("@id", customerId);
+            var dt = await FillDataTableViaCommandAsync(cmd, logger);
+            if (dt == null || dt.Rows.Count == 0) return 0;
+            return dt.Rows[0]["CUS_PointsBalance"] == DBNull.Value ? 0
+                : Convert.ToInt32(dt.Rows[0]["CUS_PointsBalance"]);
+        }
+
+        private static async Task<int> GetJabberWonkPaymentTypeIdAsync(ILogger? logger = null)
+        {
+            var cmd = new SqlCommand(
+                "SELECT PaymentTypeID FROM PaymentType WHERE PAY_TypeName = 'JabberWonk Points'");
+            var dt = await FillDataTableViaCommandAsync(cmd, logger);
+            if (dt == null || dt.Rows.Count == 0) return -1;
+            return Convert.ToInt32(dt.Rows[0]["PaymentTypeID"]);
+        }
+
+        private static async Task<int> GetPendingOrderCountAsync(int customerId, ILogger? logger = null)
+        {
+            var cmd = new SqlCommand(
+                "SELECT COUNT(1) FROM [Order] WHERE CustomerID = @id AND ORD_Status = 'Pending'");
+            cmd.Parameters.AddWithValue("@id", customerId);
+            var dt = await FillDataTableViaCommandAsync(cmd, logger);
+            if (dt == null || dt.Rows.Count == 0) return 0;
+            return dt.Rows[0][0] == DBNull.Value ? 0 : Convert.ToInt32(dt.Rows[0][0]);
+        }
 
         // ─── CART HELPERS ─────────────────────────────────────────────────────
 
@@ -462,11 +532,7 @@ namespace WebAppWithDB_Starter_v2
                 string.IsNullOrEmpty(user)  || string.IsNullOrEmpty(pass))
                 return Results.Redirect("/register?err=missing");
 
-            // Check if username is taken
-            var checkCmd = new SqlCommand("SELECT COUNT(1) FROM Customer WHERE CUS_Username = @u");
-            checkCmd.Parameters.AddWithValue("@u", user);
-            var checkDt = await FillDataTableViaCommandAsync(checkCmd, logger);
-            if (checkDt != null && Convert.ToInt32(checkDt.Rows[0][0]) > 0)
+            if (await UsernameExistsAsync(user, logger))
                 return Results.Redirect("/register?err=exists");
 
             string hash = HashPassword(pass);
@@ -503,10 +569,13 @@ namespace WebAppWithDB_Starter_v2
         }
 
         // GET /home  — Main menu (requires auth)
-        private static IResult HandleHome(HttpContext ctx)
+        private static async Task<IResult> HandleHome(HttpContext ctx, ILogger<Program> logger)
         {
             if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
-            string username = GetCurrentUsername(ctx)!;
+            string username      = GetCurrentUsername(ctx)!;
+            int    custId        = GetCurrentUserId(ctx);
+            int    pointsBal     = await GetPointsBalanceAsync(custId, logger);
+            int    pendingCount  = await GetPendingOrderCountAsync(custId, logger);
 
             string body = $@"
 <div class='container py-5'>
@@ -551,10 +620,22 @@ namespace WebAppWithDB_Starter_v2
         </div>
       </div>
     </div>
+    <div class='col-sm-10 col-md-4'>
+      <div class='card shadow h-100 border-2' style='border-color:#fbbf24 !important;'>
+        <div class='card-body text-center p-4 d-flex flex-column'>
+          <h3 class='card-title fw-bold'>&#11088; JabberWonk Points</h3>
+          <div class='display-4 fw-bold my-3' style='color:#ea580c;'>{pointsBal:N0}</div>
+          <p class='card-text text-muted flex-grow-1'>
+            Earn {JWP_PointsPerVisit} pts per visit + {JWP_PointsPerDollar} pts per $1 spent.<br>
+            Redeem {JWP_PointsPerRedempt} pts = $1.00 off your next order.
+          </p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>";
 
-            return Results.Content(Layout("Home", username, body), "text/html");
+            return Results.Content(Layout("Home", username, body, pointsBal, pendingCount), "text/html");
         }
 
         // GET /menu  — Public item catalog
@@ -644,7 +725,8 @@ namespace WebAppWithDB_Starter_v2
         private static async Task<IResult> HandleOrderGet(HttpContext ctx, ILogger<Program> logger)
         {
             if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
-            string username = GetCurrentUsername(ctx)!;
+            string username     = GetCurrentUsername(ctx)!;
+            int    pendingCount = await GetPendingOrderCountAsync(GetCurrentUserId(ctx), logger);
 
             var itemsDt = await FillDataTableViaSqlAsync(
                 "SELECT ItemID, ITM_ItemName, ITM_UnitPrice FROM Item " +
@@ -719,7 +801,7 @@ namespace WebAppWithDB_Starter_v2
   </div>
 </div>";
 
-            return Results.Content(Layout("New Order", username, body), "text/html");
+            return Results.Content(Layout("New Order", username, body, null, pendingCount), "text/html");
         }
 
         // POST /order/add  — Add item to cart
@@ -795,7 +877,8 @@ namespace WebAppWithDB_Starter_v2
             if (cart.Count == 0) return Results.Redirect("/order");
 
             var locDt = await FillDataTableViaSqlAsync(
-                "SELECT LocationID, LOC_StoreName, LOC_City, LOC_State FROM Location ORDER BY LOC_StoreName",
+                "SELECT MIN(LocationID) AS LocationID, LOC_StoreName, LOC_City, LOC_State " +
+                "FROM Location GROUP BY LOC_StoreName, LOC_City, LOC_State ORDER BY LOC_StoreName",
                 logger);
             var payDt = await FillDataTableViaSqlAsync(
                 "SELECT PaymentTypeID, PAY_TypeName FROM PaymentType ORDER BY PAY_TypeName",
@@ -808,22 +891,50 @@ namespace WebAppWithDB_Starter_v2
                         $"{H(row["LOC_StoreName"]?.ToString())} &mdash; " +
                         $"{H(row["LOC_City"]?.ToString())}, {H(row["LOC_State"]?.ToString())}</option>");
 
+            string cartHtml = RenderCartTable(cart, withRemove: false);
+            decimal total   = cart.Sum(i => i.UnitPrice * i.Quantity);
+
+            int  custId        = GetCurrentUserId(ctx);
+            int  pointsBal     = await GetPointsBalanceAsync(custId, logger);
+            int  jwpId         = await GetJabberWonkPaymentTypeIdAsync(logger);
+            int  pointsNeeded  = (int)Math.Ceiling(total * JWP_PointsPerRedempt);
+            bool canPayWithPts = pointsBal >= pointsNeeded && pointsNeeded > 0;
+
+            string bannerClass  = canPayWithPts ? "alert-success" : "alert-secondary";
+            string bannerMsg    = canPayWithPts
+                ? $"You can cover this {total:C} order with {pointsNeeded:N0} points!"
+                : $"You need {pointsNeeded:N0} pts to pay with points. Keep earning!";
+            string pointsBanner = $"<div class='alert {bannerClass} py-2 small mb-3'>" +
+                $"<strong>&#11088; Balance: {pointsBal:N0} pts</strong><br>{bannerMsg}</div>";
+
             var payOptions = new StringBuilder("<option value=''>-- Select payment type --</option>");
             if (payDt != null)
                 foreach (DataRow row in payDt.Rows)
-                    payOptions.Append($"<option value='{row["PaymentTypeID"]}'>" +
-                        $"{H(row["PAY_TypeName"]?.ToString())}</option>");
-
-            string cartHtml = RenderCartTable(cart, withRemove: false);
-            decimal total   = cart.Sum(i => i.UnitPrice * i.Quantity);
+                {
+                    int    payId   = Convert.ToInt32(row["PaymentTypeID"]);
+                    string payName = H(row["PAY_TypeName"]?.ToString());
+                    if (payId == jwpId)
+                    {
+                        string label    = canPayWithPts
+                            ? $"JabberWonk Points ({pointsBal:N0} pts — enough!)"
+                            : $"JabberWonk Points (need {pointsNeeded:N0}, have {pointsBal:N0})";
+                        string disabled = canPayWithPts ? "" : "disabled";
+                        payOptions.Append($"<option value='{payId}' {disabled}>{label}</option>");
+                    }
+                    else
+                    {
+                        payOptions.Append($"<option value='{payId}'>{payName}</option>");
+                    }
+                }
 
             string err   = ctx.Request.Query["err"].ToString();
             string alert = err switch
             {
-                "noloc" => "<div class='alert alert-danger'>Please select a location.</div>",
-                "nopay" => "<div class='alert alert-danger'>Please select a payment method.</div>",
-                "fail"  => "<div class='alert alert-danger'>Could not save order. Please try again.</div>",
-                _       => ""
+                "noloc"    => "<div class='alert alert-danger'>Please select a location.</div>",
+                "nopay"    => "<div class='alert alert-danger'>Please select a payment method.</div>",
+                "fail"     => "<div class='alert alert-danger'>Could not save order. Please try again.</div>",
+                "nopoints" => "<div class='alert alert-danger'>Not enough JabberWonk Points to cover this order.</div>",
+                _          => ""
             };
 
             string body = $@"
@@ -861,6 +972,7 @@ namespace WebAppWithDB_Starter_v2
                 {payOptions}
               </select>
             </div>
+            {pointsBanner}
             <div class='mb-3'>
               <label for='notes' class='form-label fw-semibold'>Special Notes</label>
               <textarea id='notes' name='notes' class='form-control' rows='3'
@@ -870,12 +982,6 @@ namespace WebAppWithDB_Starter_v2
             <div class='alert alert-warning d-flex justify-content-between align-items-center py-2 mb-3'>
               <strong>Total Due:</strong>
               <span class='fs-4 fw-bold'>${total:F2}</span>
-            </div>
-            <div class='form-check mb-3'>
-              <input class='form-check-input' type='checkbox' id='agree' name='agree' value='yes' required>
-              <label class='form-check-label' for='agree'>
-                I agree to pay <strong>${total:F2}</strong> for this order.
-              </label>
             </div>
             <button type='submit' class='btn btn-success btn-lg w-100 fw-bold'>
               Complete Transaction
@@ -939,9 +1045,52 @@ namespace WebAppWithDB_Starter_v2
                 await ExecSqlCommandAsync(itemCmd, logger);
             }
 
+            // ─── JabberWonk Points ────────────────────────────────────────────
+            int  jwpPayId     = await GetJabberWonkPaymentTypeIdAsync(logger);
+            bool isPointsPay  = paymentTypeId == jwpPayId && jwpPayId > 0;
+            int  currentBal   = await GetPointsBalanceAsync(customerId, logger);
+            int  pointsDelta;
+            int  newBalance;
+
+            if (isPointsPay)
+            {
+                int pointsNeeded = (int)Math.Ceiling(total * JWP_PointsPerRedempt);
+                if (currentBal < pointsNeeded)
+                    return Results.Redirect("/checkout?err=nopoints");
+                pointsDelta = -pointsNeeded;
+                newBalance  = currentBal - pointsNeeded;
+            }
+            else
+            {
+                int earned  = JWP_PointsPerVisit + ((int)Math.Floor(total) * JWP_PointsPerDollar);
+                pointsDelta = earned;
+                newBalance  = currentBal + earned;
+            }
+
+            var updateCmd = new SqlCommand(
+                "UPDATE Customer SET CUS_PointsBalance = @bal WHERE CustomerID = @cid");
+            updateCmd.Parameters.AddWithValue("@bal", newBalance);
+            updateCmd.Parameters.AddWithValue("@cid", customerId);
+            await ExecSqlCommandAsync(updateCmd, logger);
+
+            string txType = isPointsPay ? "REDEEM" : "EARN";
+            var txCmd = new SqlCommand(@"
+                INSERT INTO JabberWonkTransaction
+                    (JWT_PointsDelta, JWT_TransactionType, JWT_BalanceAfter, JWT_Notes, CustomerID, OrderID)
+                VALUES (@delta, @type, @after, @notes, @cid, @oid)");
+            txCmd.Parameters.AddWithValue("@delta", pointsDelta);
+            txCmd.Parameters.AddWithValue("@type",  txType);
+            txCmd.Parameters.AddWithValue("@after", newBalance);
+            txCmd.Parameters.AddWithValue("@notes", $"{txType} on Order #{orderId}");
+            txCmd.Parameters.AddWithValue("@cid",   customerId);
+            txCmd.Parameters.AddWithValue("@oid",   orderId);
+            await ExecSqlCommandAsync(txCmd, logger);
+
             // Store order details in session for receipt page, clear cart
-            ctx.Session.SetString("lastOrderId",    orderId.ToString());
-            ctx.Session.SetString("lastOrderTotal",  total.ToString("F2"));
+            ctx.Session.SetString("lastOrderId",      orderId.ToString());
+            ctx.Session.SetString("lastOrderTotal",   total.ToString("F2"));
+            ctx.Session.SetString("lastPointsDelta",  pointsDelta.ToString());
+            ctx.Session.SetString("lastPointsBalance", newBalance.ToString());
             ctx.Session.Remove("cart");
 
             return Results.Redirect("/receipt");
@@ -951,13 +1100,21 @@ namespace WebAppWithDB_Starter_v2
         private static async Task<IResult> HandleReceipt(HttpContext ctx, ILogger<Program> logger)
         {
             if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
-            string username = GetCurrentUsername(ctx)!;
+            string username     = GetCurrentUsername(ctx)!;
+            int    pendingCount = await GetPendingOrderCountAsync(GetCurrentUserId(ctx), logger);
 
-            string? orderIdStr = ctx.Session.GetString("lastOrderId");
+            string? orderIdStr  = ctx.Session.GetString("lastOrderId");
             if (string.IsNullOrEmpty(orderIdStr)) return Results.Redirect("/history");
 
-            int    orderId     = int.Parse(orderIdStr);
+            int    orderId      = int.Parse(orderIdStr);
             string sessionTotal = ctx.Session.GetString("lastOrderTotal") ?? "0.00";
+
+            string? ptsDeltaStr = ctx.Session.GetString("lastPointsDelta");
+            string? ptsBal      = ctx.Session.GetString("lastPointsBalance");
+            int     ptsDelta    = int.TryParse(ptsDeltaStr, out int d) ? d : 0;
+            int     newBal      = int.TryParse(ptsBal,      out int b) ? b : 0;
+            ctx.Session.Remove("lastPointsDelta");
+            ctx.Session.Remove("lastPointsBalance");
 
             // Fetch order header
             var orderCmd = new SqlCommand(@"
@@ -1009,6 +1166,14 @@ namespace WebAppWithDB_Starter_v2
                     itemRows.Append($"<tr><td>{name}</td><td class='text-center'>{qty}</td><td class='text-end'>${up:F2}</td><td class='text-end fw-semibold'>${sub:F2}</td></tr>");
                 }
 
+            string pointsSummary = ptsDeltaStr == null ? "" : ptsDelta < 0
+                ? $"<div class='alert alert-warning mt-3'>" +
+                  $"<strong>&#11088; Redeemed {Math.Abs(ptsDelta):N0} JabberWonk Points</strong><br>" +
+                  $"<span class='text-muted small'>Remaining balance: {newBal:N0} pts</span></div>"
+                : $"<div class='alert alert-success mt-3'>" +
+                  $"<strong>&#11088; +{ptsDelta:N0} JabberWonk Points Earned!</strong><br>" +
+                  $"<span class='text-muted small'>New balance: {newBal:N0} pts</span></div>";
+
             string body = $@"
 <div class='container py-5'>
   <div class='row justify-content-center'>
@@ -1045,29 +1210,32 @@ namespace WebAppWithDB_Starter_v2
               </tr>
             </tfoot>
           </table>
+          {pointsSummary}
           <p class='text-muted text-center fst-italic mt-2'>
             He chortled in his joy &mdash; your order is on its way!
           </p>
         </div>
         <div class='card-footer d-flex flex-wrap gap-2 justify-content-center py-3'>
-          <a href='/order'   class='btn btn-warning fw-semibold'>Place Another Order</a>
-          <a href='/history' class='btn btn-outline-primary'>View Order History</a>
-          <a href='/home'    class='btn btn-outline-secondary'>Main Menu</a>
+          <a href='/pickup/{orderId}' class='btn btn-success fw-bold'>&#x1F7E2; Confirm Pickup</a>
+          <a href='/order'            class='btn btn-warning fw-semibold'>Place Another Order</a>
+          <a href='/history'          class='btn btn-outline-primary'>View Order History</a>
+          <a href='/home'             class='btn btn-outline-secondary'>Main Menu</a>
         </div>
       </div>
     </div>
   </div>
 </div>";
 
-            return Results.Content(Layout("Receipt", username, body), "text/html");
+            return Results.Content(Layout("Receipt", username, body, null, pendingCount), "text/html");
         }
 
         // GET /history  — Past orders for logged-in customer
         private static async Task<IResult> HandleHistory(HttpContext ctx, ILogger<Program> logger)
         {
             if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
-            string username  = GetCurrentUsername(ctx)!;
-            int    custId    = GetCurrentUserId(ctx);
+            string username     = GetCurrentUsername(ctx)!;
+            int    custId       = GetCurrentUserId(ctx);
+            int    pendingCount = await GetPendingOrderCountAsync(custId, logger);
 
             var cmd = new SqlCommand(@"
                 SELECT
@@ -1159,7 +1327,400 @@ namespace WebAppWithDB_Starter_v2
   </div>
 </div>";
 
-            return Results.Content(Layout("Order History", username, body), "text/html");
+            return Results.Content(Layout("Order History", username, body, null, pendingCount), "text/html");
+        }
+
+        // GET /account  — Account settings
+        private static IResult HandleAccountGet(HttpContext ctx)
+        {
+            if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
+            string username = GetCurrentUsername(ctx)!;
+
+            string err = ctx.Request.Query["err"].ToString();
+            string alert = err switch
+            {
+                "exists"  => "<div class='alert alert-danger'>That username is already taken.</div>",
+                "same"    => "<div class='alert alert-warning'>That is already your username.</div>",
+                "missing" => "<div class='alert alert-danger'>New username cannot be empty.</div>",
+                "fail"    => "<div class='alert alert-danger'>Could not update username. Please try again.</div>",
+                _         => ""
+            };
+
+            string body = $@"
+<div class='container py-5'>
+  <div class='row justify-content-center'>
+    <div class='col-sm-10 col-md-6 col-lg-5'>
+      <div class='card shadow'>
+        <div class='card-header p-0'>
+          <ul class='nav nav-tabs card-header-tabs px-3 pt-2'>
+            <li class='nav-item'>
+              <span class='nav-link active fw-semibold' style='color:#ea580c;cursor:default;'>
+                Change Username
+              </span>
+            </li>
+            <li class='nav-item'>
+              <a class='nav-link text-muted' href='/history'>Order History</a>
+            </li>
+          </ul>
+        </div>
+        <div class='card-body p-4'>
+          {alert}
+          <p class='text-muted mb-4'>Logged in as <strong>{H(username)}</strong></p>
+          <form method='post' action='/account' novalidate>
+            <div class='mb-3'>
+              <label for='newUsername' class='form-label fw-semibold'>New Username</label>
+              <input type='text' id='newUsername' name='newUsername' class='form-control'
+                     required maxlength='30' autocomplete='username' autofocus>
+            </div>
+            <button type='submit' class='btn btn-warning w-100 fw-semibold'>Save Username</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>";
+
+            return Results.Content(Layout("Account", username, body), "text/html");
+        }
+
+        // GET /account/success  — Username change confirmation
+        private static IResult HandleAccountSuccess(HttpContext ctx)
+        {
+            if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
+            string username = GetCurrentUsername(ctx)!;
+
+            string body = $@"
+<div class='container py-5'>
+  <div class='row justify-content-center'>
+    <div class='col-sm-10 col-md-6 col-lg-5'>
+      <div class='card shadow border-warning border-2 text-center'>
+        <div class='card-body p-5'>
+          <div class='display-1 mb-3'>&#127811;</div>
+          <h2 class='fw-bold jj-brand mb-2' style='color:#ea580c;'>Username Updated!</h2>
+          <p class='lead fw-semibold mb-1'>Welcome, {H(username)}.</p>
+          <p class='text-muted fst-italic mt-3 mb-4'>
+            &ldquo;The vorpal blade went snicker-snack &mdash; your old name tumbled into the Tulgey Wood,
+            and a fresh-squeezed identity emerged, brillig and beaming, ready to sip.&rdquo;
+          </p>
+          <a href='/home' class='btn btn-warning btn-lg fw-bold'>Back to Home</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>";
+
+            return Results.Content(Layout("Username Updated", username, body), "text/html");
+        }
+
+        // POST /account  — Save username change
+        private static async Task<IResult> HandleAccountPost(HttpContext ctx, ILogger<Program> logger)
+        {
+            if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
+            int    custId      = GetCurrentUserId(ctx);
+            string currentName = GetCurrentUsername(ctx)!;
+
+            var form       = await ctx.Request.ReadFormAsync();
+            string newName = form["newUsername"].ToString().Trim();
+
+            if (string.IsNullOrEmpty(newName))
+                return Results.Redirect("/account?err=missing");
+            if (newName == currentName)
+                return Results.Redirect("/account?err=same");
+            if (await UsernameExistsAsync(newName, logger))
+                return Results.Redirect("/account?err=exists");
+
+            var cmd = new SqlCommand(
+                "UPDATE Customer SET CUS_Username = @name WHERE CustomerID = @id");
+            cmd.Parameters.AddWithValue("@name", newName);
+            cmd.Parameters.AddWithValue("@id",   custId);
+
+            bool ok = await ExecSqlCommandAsync(cmd, logger);
+            if (!ok) return Results.Redirect("/account?err=fail");
+
+            ctx.Session.SetString("uname", newName);
+            return Results.Redirect("/account/success");
+        }
+
+        // GET /pickup  — List pending orders or redirect to the single one
+        private static async Task<IResult> HandlePickupIndex(HttpContext ctx, ILogger<Program> logger)
+        {
+            if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
+            string username = GetCurrentUsername(ctx)!;
+            int    custId   = GetCurrentUserId(ctx);
+
+            var cmd = new SqlCommand(@"
+                SELECT o.OrderID, o.ORD_OrderDate, o.ORD_TotalAmount,
+                       l.LOC_StoreName, l.LOC_City, l.LOC_State,
+                       STRING_AGG(i.ITM_ItemName, ', ') AS Items
+                FROM [Order] o
+                JOIN Location  l  ON o.LocationID = l.LocationID
+                JOIN OrderItem oi ON o.OrderID     = oi.OrderID
+                JOIN Item      i  ON oi.ItemID     = i.ItemID
+                WHERE o.CustomerID = @cid AND o.ORD_Status = 'Pending'
+                GROUP BY o.OrderID, o.ORD_OrderDate, o.ORD_TotalAmount,
+                         l.LOC_StoreName, l.LOC_City, l.LOC_State
+                ORDER BY o.ORD_OrderDate ASC");
+            cmd.Parameters.AddWithValue("@cid", custId);
+            var dt = await FillDataTableViaCommandAsync(cmd, logger);
+
+            if (dt == null || dt.Rows.Count == 0) return Results.Redirect("/home");
+            if (dt.Rows.Count == 1) return Results.Redirect($"/pickup/{dt.Rows[0]["OrderID"]}");
+
+            int pendingCount = dt.Rows.Count;
+            var cards = new StringBuilder();
+            foreach (DataRow row in dt.Rows)
+            {
+                int     oid   = Convert.ToInt32(row["OrderID"]);
+                string  date  = row["ORD_OrderDate"] == DBNull.Value
+                    ? "—" : Convert.ToDateTime(row["ORD_OrderDate"]).ToString("g");
+                string  loc   = $"{H(row["LOC_StoreName"]?.ToString())} &mdash; " +
+                                $"{H(row["LOC_City"]?.ToString())}, {H(row["LOC_State"]?.ToString())}";
+                string  items = H(row["Items"]?.ToString() ?? "");
+                string  total = row["ORD_TotalAmount"] == DBNull.Value
+                    ? "—" : $"${Convert.ToDecimal(row["ORD_TotalAmount"]):F2}";
+                cards.Append($@"
+<div class='col'>
+  <div class='card shadow h-100 border-success border-2'>
+    <div class='card-body'>
+      <h5 class='fw-bold'>Order #{oid}</h5>
+      <p class='text-muted small mb-1'>{date}</p>
+      <p class='mb-1'><strong>Location:</strong> {loc}</p>
+      <p class='mb-2 text-muted small'>{items}</p>
+      <p class='fw-bold mb-0'>{total}</p>
+    </div>
+    <div class='card-footer'>
+      <a href='/pickup/{oid}' class='btn btn-success w-100 fw-semibold'>Select This Order</a>
+    </div>
+  </div>
+</div>");
+            }
+
+            string body = $@"
+<div class='container py-5'>
+  <div class='text-center mb-5'>
+    <h1 class='jj-brand fw-bold' style='color:#ea580c;'>Confirm Pickup</h1>
+    <p class='lead text-muted'>You have <strong>{pendingCount}</strong> pending orders. Which are you picking up?</p>
+  </div>
+  <div class='row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4'>
+    {cards}
+  </div>
+</div>";
+
+            return Results.Content(Layout("Pickup", username, body, null, pendingCount), "text/html");
+        }
+
+        // GET /pickup/{orderId}  — Confirm or cancel a specific pending order
+        private static async Task<IResult> HandlePickupOrder(int orderId, HttpContext ctx, ILogger<Program> logger)
+        {
+            if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
+            string username = GetCurrentUsername(ctx)!;
+            int    custId   = GetCurrentUserId(ctx);
+            int    pending  = await GetPendingOrderCountAsync(custId, logger);
+
+            var orderCmd = new SqlCommand(@"
+                SELECT o.OrderID, o.ORD_OrderDate, o.ORD_Status, o.ORD_TotalAmount, o.ORD_Notes,
+                       l.LOC_StoreName, l.LOC_City, l.LOC_State,
+                       p.PAY_TypeName
+                FROM [Order] o
+                JOIN Location    l ON o.LocationID    = l.LocationID
+                JOIN PaymentType p ON o.PaymentTypeID = p.PaymentTypeID
+                WHERE o.OrderID = @oid AND o.CustomerID = @cid");
+            orderCmd.Parameters.AddWithValue("@oid", orderId);
+            orderCmd.Parameters.AddWithValue("@cid", custId);
+            var orderDt = await FillDataTableViaCommandAsync(orderCmd, logger);
+
+            if (orderDt == null || orderDt.Rows.Count == 0) return Results.Redirect("/pickup");
+
+            var oRow   = orderDt.Rows[0];
+            string status = oRow["ORD_Status"]?.ToString() ?? "";
+            if (!status.Equals("Pending", StringComparison.OrdinalIgnoreCase))
+                return Results.Redirect("/history");
+
+            string storeName = $"{H(oRow["LOC_StoreName"]?.ToString())} &mdash; " +
+                               $"{H(oRow["LOC_City"]?.ToString())}, {H(oRow["LOC_State"]?.ToString())}";
+            string payType   = H(oRow["PAY_TypeName"]?.ToString());
+            string orderDate = oRow["ORD_OrderDate"] == DBNull.Value
+                ? "—" : Convert.ToDateTime(oRow["ORD_OrderDate"]).ToString("f");
+            string total     = oRow["ORD_TotalAmount"] == DBNull.Value
+                ? "—" : $"${Convert.ToDecimal(oRow["ORD_TotalAmount"]):F2}";
+            string notes     = (oRow["ORD_Notes"] != DBNull.Value && !string.IsNullOrWhiteSpace(oRow["ORD_Notes"]?.ToString()))
+                ? $"<p class='text-muted small mb-2'><strong>Notes:</strong> {H(oRow["ORD_Notes"]?.ToString())}</p>"
+                : "";
+
+            var itemsCmd = new SqlCommand(@"
+                SELECT i.ITM_ItemName, oi.ORI_Quantity, oi.ORI_UnitPrice, oi.ORI_Subtotal
+                FROM OrderItem oi
+                JOIN Item i ON oi.ItemID = i.ItemID
+                WHERE oi.OrderID = @oid ORDER BY i.ITM_ItemName");
+            itemsCmd.Parameters.AddWithValue("@oid", orderId);
+            var itemsDt = await FillDataTableViaCommandAsync(itemsCmd, logger);
+
+            var itemRows = new StringBuilder();
+            if (itemsDt != null)
+                foreach (DataRow row in itemsDt.Rows)
+                    itemRows.Append($"<tr>" +
+                        $"<td>{H(row["ITM_ItemName"]?.ToString())}</td>" +
+                        $"<td class='text-center'>{Convert.ToInt32(row["ORI_Quantity"])}</td>" +
+                        $"<td class='text-end'>${Convert.ToDecimal(row["ORI_UnitPrice"]):F2}</td>" +
+                        $"<td class='text-end fw-semibold'>${Convert.ToDecimal(row["ORI_Subtotal"]):F2}</td>" +
+                        $"</tr>");
+
+            string body = $@"
+<div class='container py-5'>
+  <div class='row justify-content-center'>
+    <div class='col-sm-12 col-md-8 col-lg-7'>
+      <div class='card shadow border-success border-2'>
+        <div class='card-header text-white fw-bold fs-5 text-center' style='background-color:#16a34a;'>
+          &#x1F7E2; Confirm Pickup &mdash; Order #{orderId}
+        </div>
+        <div class='card-body p-4'>
+          <div class='row mb-3'>
+            <div class='col-6'><strong>Date:</strong> {orderDate}</div>
+            <div class='col-6 text-end'><strong>Payment:</strong> {payType}</div>
+          </div>
+          <p class='mb-2'><strong>Location:</strong> {storeName}</p>
+          {notes}
+          <hr>
+          <table class='table table-bordered mb-3'>
+            <thead class='table-warning'>
+              <tr>
+                <th>Item</th><th class='text-center'>Qty</th>
+                <th class='text-end'>Price</th><th class='text-end'>Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>{itemRows}</tbody>
+            <tfoot class='table-light fw-bold'>
+              <tr>
+                <td colspan='3' class='text-end'>Total:</td>
+                <td class='text-end'>{total}</td>
+              </tr>
+            </tfoot>
+          </table>
+          <p class='text-muted fst-italic text-center small'>
+            Ready to pick up your order? Confirm below, or cancel if plans have changed.
+          </p>
+        </div>
+        <div class='card-footer d-flex gap-3 justify-content-center py-3'>
+          <form method='post' action='/pickup/{orderId}/confirm'>
+            <button type='submit' class='btn btn-success btn-lg fw-bold px-5'>
+              &#x2714; Confirm Pickup
+            </button>
+          </form>
+          <form method='post' action='/pickup/{orderId}/cancel'>
+            <button type='submit' class='btn btn-outline-danger btn-lg px-5'>
+              &#x2716; Cancel Order
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>";
+
+            return Results.Content(Layout("Pickup", username, body, null, pending), "text/html");
+        }
+
+        // POST /pickup/{orderId}/confirm  — Mark order Completed, store quote, redirect to success
+        private static async Task<IResult> HandlePickupConfirm(int orderId, HttpContext ctx, ILogger<Program> logger)
+        {
+            if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
+            int custId = GetCurrentUserId(ctx);
+
+            // Verify ownership and Pending status before updating
+            var checkCmd = new SqlCommand(
+                "SELECT ORD_Status FROM [Order] WHERE OrderID = @oid AND CustomerID = @cid");
+            checkCmd.Parameters.AddWithValue("@oid", orderId);
+            checkCmd.Parameters.AddWithValue("@cid", custId);
+            var checkDt = await FillDataTableViaCommandAsync(checkCmd, logger);
+            if (checkDt == null || checkDt.Rows.Count == 0) return Results.Redirect("/pickup");
+            if (!checkDt.Rows[0]["ORD_Status"].ToString()!
+                    .Equals("Pending", StringComparison.OrdinalIgnoreCase))
+                return Results.Redirect("/history");
+
+            var updateCmd = new SqlCommand(
+                "UPDATE [Order] SET ORD_Status = 'Completed' WHERE OrderID = @oid AND CustomerID = @cid");
+            updateCmd.Parameters.AddWithValue("@oid", orderId);
+            updateCmd.Parameters.AddWithValue("@cid", custId);
+            await ExecSqlCommandAsync(updateCmd, logger);
+
+            // Fetch drink names from this order to pick a quote
+            var drinksCmd = new SqlCommand(@"
+                SELECT DISTINCT i.ITM_ItemName
+                FROM OrderItem oi JOIN Item i ON oi.ItemID = i.ItemID
+                WHERE oi.OrderID = @oid");
+            drinksCmd.Parameters.AddWithValue("@oid", orderId);
+            var drinksDt = await FillDataTableViaCommandAsync(drinksCmd, logger);
+
+            var drinkNames = new List<string>();
+            if (drinksDt != null)
+                foreach (DataRow row in drinksDt.Rows)
+                    drinkNames.Add(row["ITM_ItemName"]?.ToString() ?? "");
+
+            ctx.Session.SetString("pickupQuote", DrinkQuotes.GetRandom(drinkNames));
+            return Results.Redirect($"/pickup/{orderId}/success");
+        }
+
+        // POST /pickup/{orderId}/cancel  — Mark order Cancelled and go to history
+        private static async Task<IResult> HandlePickupCancel(int orderId, HttpContext ctx, ILogger<Program> logger)
+        {
+            if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
+            int custId = GetCurrentUserId(ctx);
+
+            var checkCmd = new SqlCommand(
+                "SELECT ORD_Status FROM [Order] WHERE OrderID = @oid AND CustomerID = @cid");
+            checkCmd.Parameters.AddWithValue("@oid", orderId);
+            checkCmd.Parameters.AddWithValue("@cid", custId);
+            var checkDt = await FillDataTableViaCommandAsync(checkCmd, logger);
+            if (checkDt == null || checkDt.Rows.Count == 0) return Results.Redirect("/pickup");
+            if (!checkDt.Rows[0]["ORD_Status"].ToString()!
+                    .Equals("Pending", StringComparison.OrdinalIgnoreCase))
+                return Results.Redirect("/history");
+
+            var updateCmd = new SqlCommand(
+                "UPDATE [Order] SET ORD_Status = 'Cancelled' WHERE OrderID = @oid AND CustomerID = @cid");
+            updateCmd.Parameters.AddWithValue("@oid", orderId);
+            updateCmd.Parameters.AddWithValue("@cid", custId);
+            await ExecSqlCommandAsync(updateCmd, logger);
+
+            return Results.Redirect("/history");
+        }
+
+        // GET /pickup/{orderId}/success  — Pickup confirmed success page with drink quote
+        private static async Task<IResult> HandlePickupSuccess(int orderId, HttpContext ctx, ILogger<Program> logger)
+        {
+            if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
+            string username     = GetCurrentUsername(ctx)!;
+            int    pendingCount = await GetPendingOrderCountAsync(GetCurrentUserId(ctx), logger);
+
+            string quote = ctx.Session.GetString("pickupQuote") ?? DrinkQuotes.Fallback;
+            ctx.Session.Remove("pickupQuote");
+
+            string body = $@"
+<div class='container py-5'>
+  <div class='row justify-content-center'>
+    <div class='col-sm-10 col-md-7 col-lg-6'>
+      <div class='card shadow border-success border-3 text-center'>
+        <div class='card-body p-5'>
+          <div class='display-1 mb-3'>&#127811;</div>
+          <h2 class='fw-bold jj-brand mb-1' style='color:#16a34a;'>Order Picked Up!</h2>
+          <p class='text-muted mb-4'>Order #{orderId} is now complete.</p>
+          <hr>
+          <p class='fst-italic fs-5 mt-4 mb-4' style='color:#ea580c;'>
+            &ldquo;{H(quote)}&rdquo;
+          </p>
+          <hr>
+          <div class='d-flex flex-wrap gap-2 justify-content-center mt-4'>
+            <a href='/order'   class='btn btn-warning fw-semibold'>Order Again</a>
+            <a href='/history' class='btn btn-outline-primary'>Order History</a>
+            <a href='/home'    class='btn btn-outline-secondary'>Home</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>";
+
+            return Results.Content(Layout("Pickup Complete", username, body, null, pendingCount), "text/html");
         }
 
         // GET /error

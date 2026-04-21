@@ -40,6 +40,8 @@ The name, the menu items, the store addresses, and half the copy on the pages ar
 
 ## Running Locally
 
+> Quick reference: [`LOCAL_DEV.md`](LOCAL_DEV.md)
+
 **Prerequisites:** .NET 10 SDK
 
 ```bash
