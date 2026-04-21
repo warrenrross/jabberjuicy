@@ -102,27 +102,34 @@ Without this file the app will start but all database calls will fail.
 
 ## Database Schema
 
-See [`JabberJuicy_Master_Schema.txt`](JabberJuicy_Master_Schema.txt) for the full `CREATE TABLE` statements and seed data.
+See [`JabberJuicy_Master_Schema.txt`](JabberJuicy_Master_Schema.txt) for the full `CREATE TABLE` statements and seed data. Incremental changes to the live DB are tracked in [`db_changes.txt`](db_changes.txt).
 
-**Tables:** `Customer`, `Item`, `Location`, `PaymentType`, `[Order]`, `OrderItem`
+**Tables:** `Customer`, `Item`, `Location`, `PaymentType`, `[Order]`, `OrderItem`, `JabberWonkTransaction`
 
 All primary keys are `IDENTITY(1,1)` — do not specify ID values on `INSERT`.
+
+Order status values: `Pending` → `Completed` (pickup confirmed) or `Cancelled`.
 
 ---
 
 ## App Pages
 
-| Route | Description |
-|---|---|
-| `/` | Landing / hero page |
-| `/register` | Create account |
-| `/login` | Sign in |
-| `/home` | Dashboard (requires login) |
-| `/menu` | Public item catalog |
-| `/order` | Build cart (requires login) |
-| `/checkout` | Select location, payment, confirm |
-| `/receipt` | Order confirmation |
-| `/history` | Past orders (requires login) |
+| Route | Auth | Description |
+|---|---|---|
+| `/` | — | Landing / hero page |
+| `/register` | — | Create account |
+| `/login` | — | Sign in |
+| `/home` | ✓ | Dashboard with points balance |
+| `/menu` | — | Public item catalog |
+| `/order` | ✓ | Build cart |
+| `/checkout` | ✓ | Location, payment, confirm |
+| `/receipt` | ✓ | Order confirmation |
+| `/history` | ✓ | Past orders |
+| `/account` | ✓ | Change username |
+| `/account/success` | ✓ | Username change confirmation |
+| `/pickup` | ✓ | Select pending order to confirm |
+| `/pickup/{id}` | ✓ | Confirm or cancel a specific order |
+| `/pickup/{id}/success` | ✓ | Pickup confirmed + drink quote |
 
 ---
 
