@@ -90,6 +90,7 @@ namespace WebAppWithDB_Starter_v2
             app.MapGet("/pickup/{orderId:int}",          HandlePickupOrder);
             app.MapPost("/pickup/{orderId:int}/confirm", HandlePickupConfirm);
             app.MapPost("/pickup/{orderId:int}/cancel",  HandlePickupCancel);
+            app.MapGet("/pickup/{orderId:int}/success",  HandlePickupSuccess);
         }
 
         // ─── LAYOUT HELPERS ──────────────────────────────────────────────────
@@ -1660,14 +1661,14 @@ namespace WebAppWithDB_Starter_v2
             return Results.Redirect($"/pickup/{orderId}/success");
         }
 
-        // POST /pickup/{orderId}/cancel  — Mark order Cancelled and go to history
+        // POST /pickup/{orderId}/cancel  — Mark order Cancelled, refund points if JWP order, go to history
         private static async Task<IResult> HandlePickupCancel(int orderId, HttpContext ctx, ILogger<Program> logger)
         {
             if (!IsAuthenticated(ctx)) return Results.Redirect("/login");
             int custId = GetCurrentUserId(ctx);
 
             var checkCmd = new SqlCommand(
-                "SELECT ORD_Status FROM [Order] WHERE OrderID = @oid AND CustomerID = @cid");
+                "SELECT ORD_Status, PaymentTypeID FROM [Order] WHERE OrderID = @oid AND CustomerID = @cid");
             checkCmd.Parameters.AddWithValue("@oid", orderId);
             checkCmd.Parameters.AddWithValue("@cid", custId);
             var checkDt = await FillDataTableViaCommandAsync(checkCmd, logger);
@@ -1676,11 +1677,49 @@ namespace WebAppWithDB_Starter_v2
                     .Equals("Pending", StringComparison.OrdinalIgnoreCase))
                 return Results.Redirect("/history");
 
+            int orderPayTypeId = Convert.ToInt32(checkDt.Rows[0]["PaymentTypeID"]);
+
             var updateCmd = new SqlCommand(
                 "UPDATE [Order] SET ORD_Status = 'Cancelled' WHERE OrderID = @oid AND CustomerID = @cid");
             updateCmd.Parameters.AddWithValue("@oid", orderId);
             updateCmd.Parameters.AddWithValue("@cid", custId);
             await ExecSqlCommandAsync(updateCmd, logger);
+
+            // Refund points if the order was paid with JabberWonk Points
+            int jwpPayId = await GetJabberWonkPaymentTypeIdAsync(logger);
+            if (jwpPayId > 0 && orderPayTypeId == jwpPayId)
+            {
+                var txLookupCmd = new SqlCommand(
+                    "SELECT TOP 1 JWT_PointsDelta FROM JabberWonkTransaction " +
+                    "WHERE OrderID = @oid AND CustomerID = @cid AND JWT_TransactionType = 'REDEEM'");
+                txLookupCmd.Parameters.AddWithValue("@oid", orderId);
+                txLookupCmd.Parameters.AddWithValue("@cid", custId);
+                var txDt = await FillDataTableViaCommandAsync(txLookupCmd, logger);
+
+                if (txDt != null && txDt.Rows.Count > 0)
+                {
+                    int pointsToRefund = Math.Abs(Convert.ToInt32(txDt.Rows[0]["JWT_PointsDelta"]));
+                    int currentBal     = await GetPointsBalanceAsync(custId, logger);
+                    int newBalance     = currentBal + pointsToRefund;
+
+                    var balCmd = new SqlCommand(
+                        "UPDATE Customer SET CUS_PointsBalance = @bal WHERE CustomerID = @cid");
+                    balCmd.Parameters.AddWithValue("@bal", newBalance);
+                    balCmd.Parameters.AddWithValue("@cid", custId);
+                    await ExecSqlCommandAsync(balCmd, logger);
+
+                    var refundTxCmd = new SqlCommand(@"
+                        INSERT INTO JabberWonkTransaction
+                            (JWT_PointsDelta, JWT_TransactionType, JWT_BalanceAfter, JWT_Notes, CustomerID, OrderID)
+                        VALUES (@delta, 'REFUND', @after, @notes, @cid, @oid)");
+                    refundTxCmd.Parameters.AddWithValue("@delta", pointsToRefund);
+                    refundTxCmd.Parameters.AddWithValue("@after", newBalance);
+                    refundTxCmd.Parameters.AddWithValue("@notes", $"REFUND on cancelled Order #{orderId}");
+                    refundTxCmd.Parameters.AddWithValue("@cid",   custId);
+                    refundTxCmd.Parameters.AddWithValue("@oid",   orderId);
+                    await ExecSqlCommandAsync(refundTxCmd, logger);
+                }
+            }
 
             return Results.Redirect("/history");
         }
