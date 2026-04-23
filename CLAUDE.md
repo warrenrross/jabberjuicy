@@ -96,8 +96,11 @@ Single-file ASP.NET Core Minimal API. All routes and handlers live in `Program.c
 | Spend bonus | 10 pts per whole dollar (floor) |
 | Redemption rate | 100 pts = $1.00 |
 | Earn on points-redeemed orders | 0 (no double-dip) |
+| Cancellation refund | Full points refunded if order was paid with JWP |
 
 Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_PointsPerDollar`, `JWP_PointsPerRedempt`.
+
+**`JWT_TransactionType` values:** `EARN` (cash/card order completed), `REDEEM` (JWP order placed), `REFUND` (JWP order cancelled). The cancel handler looks up the original `REDEEM` row to get the exact points to restore.
 
 ## Known Issues
 
@@ -109,11 +112,17 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 
 4. **Custom domain HTTPS** — `jabberjuicy.com` DNS resolves but Railway has not auto-provisioned the HTTPS cert for the apex domain. `www.jabberjuicy.com` may have the same issue. Check Railway → Settings → Networking after next deploy.
 
+## Session Notes (Apr 23, 2026)
+
+- **Fixed:** `GET /pickup/{orderId}/success` route was missing from route registration — handler existed but was unreachable, causing a broken link after confirming pickup. Added `app.MapGet("/pickup/{orderId:int}/success", HandlePickupSuccess)`.
+- **Added:** JWP points refund on order cancellation. `HandlePickupCancel` now checks if the cancelled order was paid with JabberWonk Points; if so, it looks up the original `REDEEM` transaction, restores the exact points to `CUS_PointsBalance`, and logs a `REFUND` entry in `JabberWonkTransaction`.
+- Both fixes pushed to `origin/main` (commit `372cdaf`) and deployed to Railway.
+
 ## What's Next (Phase 3 Remaining)
 
 - [ ] SQL Queries deliverable (Grayson & Andrew) — analytical queries against the live DB
 - [ ] User's Manual (Grayson) — document the app for end users
-- [ ] Update `Echo_Data_Dictionary.xlsx` with new schema changes
+- [ ] Update `Echo_Data_Dictionary.xlsx` with new schema changes (add `REFUND` transaction type, `CUS_PointsBalance`, `JabberWonkTransaction` table)
 - [ ] Fix duplicate location rows in DB (see Known Issue #1)
 - [ ] Test full end-to-end flow on live Railway deployment after Phase 3 push
 - [ ] Prepare presentation (all members, Apr 28–30)
