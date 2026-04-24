@@ -73,6 +73,11 @@ namespace WebAppWithDB_Starter_v2
         private static void MapRoutes(WebApplication app)
         {
             app.MapGet("/",             HandleLanding);
+            app.MapGet("/admin",        HandleAdminDashboard);
+            app.MapGet("/admin/login",  HandleAdminLoginGet);
+            app.MapPost("/admin/login",         HandleAdminLoginPost);
+            app.MapPost("/admin/points-adjust", HandleAdminPointsAdjust);
+            app.MapGet("/admin/logout",         HandleAdminLogout);
             app.MapGet("/login",        HandleLoginGet);
             app.MapPost("/login",       HandleLoginPost);
             app.MapGet("/register",     HandleRegisterGet);
@@ -130,6 +135,10 @@ namespace WebAppWithDB_Starter_v2
 
         private static string NavBar(string? username, int? pointsBalance = null, int pendingCount = 0)
         {
+            string demoAdminPill =
+                "<li class='nav-item'><a class='nav-link px-2' href='/admin/login'>" +
+                "<span class='badge rounded-pill px-3 py-2 fw-semibold border border-danger bg-white' " +
+                "style='color:#b91c1c;'>Demo Admin</span></a></li>";
             string pointsBadge = (username != null && pointsBalance.HasValue)
                 ? $"<li class='nav-item'><span class='navbar-text ms-1'>" +
                   $"<span class='badge rounded-pill' style='background:#fbbf24;color:#1a1a1a;'>" +
@@ -156,10 +165,12 @@ namespace WebAppWithDB_Starter_v2
                        </ul>
                      </li>
                      {pointsBadge}
-                     <li class='nav-item'><a class='nav-link text-white' href='/logout'>Logout</a></li>"
+                     <li class='nav-item'><a class='nav-link text-white' href='/logout'>Logout</a></li>
+                     {demoAdminPill}"
                 : @"<li class='nav-item'><a class='nav-link text-white' href='/menu'>Menu</a></li>
                     <li class='nav-item'><a class='nav-link text-white' href='/login'>Login</a></li>
-                    <li class='nav-item'><a class='nav-link text-white' href='/register'>Register</a></li>";
+                    <li class='nav-item'><a class='nav-link text-white' href='/register'>Register</a></li>
+                    " + demoAdminPill;
 
             return $@"
 <nav class='navbar navbar-expand-lg jj-nav shadow-sm'>
@@ -221,6 +232,67 @@ namespace WebAppWithDB_Starter_v2
 
         private static string? GetCurrentUsername(HttpContext ctx) =>
             ctx.Session.GetString("uname");
+
+        private static bool IsAdminAuthenticated(HttpContext ctx) =>
+            ctx.Session.GetString("admin_uid") != null;
+
+        private static int GetCurrentAdminId(HttpContext ctx) =>
+            int.TryParse(ctx.Session.GetString("admin_uid"), out int id) ? id : 0;
+
+        private static string? GetCurrentAdminUsername(HttpContext ctx) =>
+            ctx.Session.GetString("admin_uname");
+
+        private static string? GetCurrentAdminDisplayName(HttpContext ctx) =>
+            ctx.Session.GetString("admin_display");
+
+        private static string? GetCurrentAdminRole(HttpContext ctx) =>
+            ctx.Session.GetString("admin_role");
+
+        private static bool GetCurrentAdminIsGlobalAccess(HttpContext ctx) =>
+            ctx.Session.GetString("admin_global") == "1";
+
+        private static void SignInAdminSession(HttpContext ctx, DataRow row)
+        {
+            ctx.Session.SetString("admin_uid", row["AdminUserID"].ToString()!);
+            ctx.Session.SetString("admin_uname", row["ADM_Username"].ToString()!);
+            ctx.Session.SetString("admin_display", row["ADM_DisplayName"].ToString()!);
+            ctx.Session.SetString("admin_role", row["ADM_Role"].ToString()!);
+            ctx.Session.SetString("admin_global",
+                Convert.ToBoolean(row["ADM_IsGlobalAccess"]) ? "1" : "0");
+        }
+
+        private static void ClearAdminSession(HttpContext ctx)
+        {
+            ctx.Session.Remove("admin_uid");
+            ctx.Session.Remove("admin_uname");
+            ctx.Session.Remove("admin_display");
+            ctx.Session.Remove("admin_role");
+            ctx.Session.Remove("admin_global");
+        }
+
+        private static int? ParseNullableInt(string? value) =>
+            int.TryParse(value, out int id) ? id : null;
+
+        private static string BuildAdminUrl(string grain, int? locationId, string? q = null,
+            int? customerId = null, int? orderId = null, string? metricRange = null)
+        {
+            var parts = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(grain))
+                parts.Add($"grain={Uri.EscapeDataString(grain)}");
+            if (!string.IsNullOrWhiteSpace(metricRange))
+                parts.Add($"metricRange={Uri.EscapeDataString(metricRange)}");
+            if (locationId.HasValue)
+                parts.Add($"locationId={locationId.Value}");
+            if (!string.IsNullOrWhiteSpace(q))
+                parts.Add($"q={Uri.EscapeDataString(q)}");
+            if (customerId.HasValue)
+                parts.Add($"customerId={customerId.Value}");
+            if (orderId.HasValue)
+                parts.Add($"orderId={orderId.Value}");
+
+            return parts.Count == 0 ? "/admin" : "/admin?" + string.Join("&", parts);
+        }
 
         private static async Task<bool> UsernameExistsAsync(string username, ILogger? logger = null)
         {
@@ -355,6 +427,295 @@ namespace WebAppWithDB_Starter_v2
 </div>";
 
             return Results.Content(Layout("Welcome", null, body), "text/html");
+        }
+
+        // GET /admin/login
+        private static IResult HandleAdminLoginGet(HttpContext ctx)
+        {
+            if (IsAdminAuthenticated(ctx)) return Results.Redirect("/admin");
+
+            string msg = ctx.Request.Query["msg"].ToString();
+            string err = ctx.Request.Query["err"].ToString();
+
+            string alert = (msg, err) switch
+            {
+                ("loggedout", _) => "<div class='alert alert-success'>Admin session closed.</div>",
+                (_, "invalid")   => "<div class='alert alert-danger'>Invalid admin username or password.</div>",
+                (_, "inactive")  => "<div class='alert alert-danger'>This admin account is inactive.</div>",
+                (_, "config")    => "<div class='alert alert-warning'>Admin tables are not available yet. Run <code>admin_db_sql.txt</code> and your local <code>insert_sql.txt</code> first.</div>",
+                _                => ""
+            };
+
+            string body = $@"
+<div class='container py-5'>
+  <div class='row justify-content-center'>
+    <div class='col-sm-11 col-md-8 col-lg-6'>
+      <div class='card shadow border-danger border-2'>
+        <div class='card-body p-4 p-md-5'>
+          <div class='text-center mb-4'>
+            <span class='badge rounded-pill border border-danger bg-white px-3 py-2 fw-semibold mb-3'
+                  style='color:#b91c1c;'>Demo Admin</span>
+            <h1 class='jj-brand fw-bold mb-2' style='color:#ea580c;'>Admin Login</h1>
+            <p class='text-muted mb-0'>
+              Separate admin authentication has been selected for the long-term implementation.
+            </p>
+          </div>
+          {alert}
+          <form method='post' action='/admin/login' novalidate>
+            <div class='mb-3'>
+              <label class='form-label fw-semibold'>Username</label>
+              <input class='form-control' name='username' maxlength='30'
+                     autocomplete='username' autofocus required>
+            </div>
+            <div class='mb-3'>
+              <label class='form-label fw-semibold'>Password</label>
+              <input class='form-control' type='password' name='password'
+                     autocomplete='current-password' required>
+            </div>
+            <button type='submit' class='btn btn-danger w-100 fw-semibold'>
+              Login to Admin Dashboard
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>";
+
+            return Results.Content(Layout("Admin Login", null, body), "text/html");
+        }
+
+        // POST /admin/login
+        private static async Task<IResult> HandleAdminLoginPost(HttpContext ctx, ILogger<Program> logger)
+        {
+            var form = await ctx.Request.ReadFormAsync();
+            string user = form["username"].ToString().Trim();
+            string pass = form["password"].ToString();
+
+            if (string.IsNullOrEmpty(user) || string.IsNullOrEmpty(pass))
+                return Results.Redirect("/admin/login?err=invalid");
+
+            var cmd = new SqlCommand(@"
+                SELECT AdminUserID, ADM_Username, ADM_PasswordHash, ADM_DisplayName,
+                       ADM_Role, ADM_IsActive, ADM_IsGlobalAccess
+                FROM AdminUser
+                WHERE ADM_Username = @u");
+            cmd.Parameters.AddWithValue("@u", user);
+
+            var dt = await FillDataTableViaCommandAsync(cmd, logger);
+            if (dt == null) return Results.Redirect("/admin/login?err=config");
+            if (dt.Rows.Count == 0) return Results.Redirect("/admin/login?err=invalid");
+
+            var row = dt.Rows[0];
+            if (!Convert.ToBoolean(row["ADM_IsActive"]))
+                return Results.Redirect("/admin/login?err=inactive");
+
+            string stored = row["ADM_PasswordHash"]?.ToString() ?? "";
+            if (!VerifyPassword(pass, stored))
+                return Results.Redirect("/admin/login?err=invalid");
+
+            SignInAdminSession(ctx, row);
+
+            var updateCmd = new SqlCommand(
+                "UPDATE AdminUser SET ADM_LastLoginAt = GETDATE() WHERE AdminUserID = @id");
+            updateCmd.Parameters.AddWithValue("@id", Convert.ToInt32(row["AdminUserID"]));
+            await ExecSqlCommandAsync(updateCmd, logger);
+
+            return Results.Redirect("/admin");
+        }
+
+        // GET /admin/logout
+        private static IResult HandleAdminLogout(HttpContext ctx)
+        {
+            ClearAdminSession(ctx);
+            return Results.Redirect("/admin/login?msg=loggedout");
+        }
+
+        // POST /admin/points-adjust
+        private static async Task<IResult> HandleAdminPointsAdjust(HttpContext ctx, ILogger<Program> logger)
+        {
+            if (!IsAdminAuthenticated(ctx)) return Results.Redirect("/admin/login");
+
+            var form = await ctx.Request.ReadFormAsync();
+            int customerId = int.TryParse(form["customerId"], out int cid) ? cid : 0;
+            int delta      = int.TryParse(form["delta"],      out int d)   ? d   : 0;
+            string reason  = form["reason"].ToString().Trim();
+            string grain       = form["grain"].ToString()       is { Length: > 0 } g ? g : "day";
+            string metricRange = form["metricRange"].ToString() is { Length: > 0 } m ? m : "day";
+            int? locationId = int.TryParse(form["locationId"], out int loc) ? loc : null;
+            string q = form["q"].ToString().Trim();
+
+            string failUrl = BuildAdminUrl(grain, locationId, q, customerId == 0 ? null : (int?)customerId, null, metricRange);
+
+            if (customerId == 0 || delta == 0)
+                return Results.Redirect(failUrl + "&adjErr=invalid");
+
+            // Atomically clamp balance to >= 0 and return the new value
+            var balCmd = new SqlCommand(@"
+                UPDATE Customer
+                SET CUS_PointsBalance = CASE
+                    WHEN CUS_PointsBalance + @delta < 0 THEN 0
+                    ELSE CUS_PointsBalance + @delta
+                END
+                OUTPUT INSERTED.CUS_PointsBalance
+                WHERE CustomerID = @cid");
+            balCmd.Parameters.AddWithValue("@delta", delta);
+            balCmd.Parameters.AddWithValue("@cid", customerId);
+            var balDt = await FillDataTableViaCommandAsync(balCmd, logger);
+
+            if (balDt == null || balDt.Rows.Count == 0)
+                return Results.Redirect(failUrl + "&adjErr=fail");
+
+            int newBalance = Convert.ToInt32(balDt.Rows[0][0]);
+            int adminId = GetCurrentAdminId(ctx);
+            string adminDisplay = GetCurrentAdminDisplayName(ctx) ?? GetCurrentAdminUsername(ctx) ?? "Admin";
+            string noteText = string.IsNullOrWhiteSpace(reason)
+                ? $"Admin adjustment by {adminDisplay}: delta {delta}"
+                : $"Admin adjustment by {adminDisplay}: {reason}";
+
+            var auditCmd = new SqlCommand(@"
+                INSERT INTO AdminAuditLog
+                    (AdminUserID, CustomerID, AAL_ActionType, AAL_EntityType, AAL_EntityID, AAL_Details, AAL_CreatedAt)
+                VALUES (@adminId, @cid, 'POINTS_ADJUST', 'Customer', @cid, @details, GETDATE())");
+            auditCmd.Parameters.AddWithValue("@adminId", adminId);
+            auditCmd.Parameters.AddWithValue("@cid", customerId);
+            auditCmd.Parameters.AddWithValue("@details", $"delta={delta}, newBalance={newBalance}, reason={reason}");
+            await ExecSqlCommandAsync(auditCmd, logger);
+
+            string returnUrl = BuildAdminUrl(grain, locationId, q, (int?)customerId, null, metricRange);
+            return Results.Redirect(returnUrl + "&adjOk=1");
+        }
+
+        // GET /admin
+        private static async Task<IResult> HandleAdminDashboard(HttpContext ctx, ILogger<Program> logger)
+        {
+            if (!IsAdminAuthenticated(ctx)) return Results.Redirect("/admin/login");
+
+            string adminDisplay = GetCurrentAdminDisplayName(ctx) ?? GetCurrentAdminUsername(ctx) ?? "Admin";
+            string adminRole = GetCurrentAdminRole(ctx) ?? "Admin";
+            bool isGlobal = GetCurrentAdminIsGlobalAccess(ctx);
+            string grain = ctx.Request.Query["grain"].ToString().ToLowerInvariant() switch
+            {
+                "hour" => "hour",
+                "week" => "week",
+                _ => "day"
+            };
+            string metricRange = ctx.Request.Query["metricRange"].ToString().ToLowerInvariant() switch
+            {
+                "week" => "week",
+                "month" => "month",
+                _ => "day"
+            };
+            string q = ctx.Request.Query["q"].ToString().Trim();
+            int? requestedLocationId = ParseNullableInt(ctx.Request.Query["locationId"]);
+            int? selectedCustomerId = ParseNullableInt(ctx.Request.Query["customerId"]);
+            int? selectedOrderId = ParseNullableInt(ctx.Request.Query["orderId"]);
+            if (!selectedOrderId.HasValue && int.TryParse(q, out int searchedOrderId))
+                selectedOrderId = searchedOrderId;
+
+            var locationsDt = await GetAdminAccessibleLocationsAsync(GetCurrentAdminId(ctx), isGlobal, logger);
+            if (locationsDt == null)
+            {
+                string setupBody = RenderAdminSetupBody(
+                    adminDisplay,
+                    "Admin database objects are not available or the query failed.",
+                    "Apply admin_db_sql.txt and your local insert_sql.txt, then try the admin dashboard again.");
+                return Results.Content(Layout("Admin Dashboard", null, setupBody), "text/html");
+            }
+
+            if (!isGlobal && locationsDt.Rows.Count == 0)
+            {
+                string deniedBody = RenderAdminSetupBody(
+                    adminDisplay,
+                    "This admin account has no assigned store access.",
+                    "Add at least one AdminLocationAccess row or mark the account as global.");
+                return Results.Content(Layout("Admin Dashboard", null, deniedBody), "text/html");
+            }
+
+            int? selectedLocationId = ResolveAdminLocationId(locationsDt, requestedLocationId, isGlobal);
+
+            if (selectedOrderId.HasValue && !selectedCustomerId.HasValue)
+                selectedCustomerId = await GetCustomerIdForAdminOrderAsync(selectedOrderId.Value, selectedLocationId, logger);
+
+            int adminId = GetCurrentAdminId(ctx);
+            string adjOk  = ctx.Request.Query["adjOk"].ToString();
+            string adjErr = ctx.Request.Query["adjErr"].ToString();
+            string adjAlert = (adjOk, adjErr) switch
+            {
+                ("1", _)       => "<div class='alert alert-success py-2 mb-3'>Points adjusted successfully.</div>",
+                (_, "invalid") => "<div class='alert alert-danger py-2 mb-3'>Invalid adjustment — delta must be non-zero and customer must be selected.</div>",
+                (_, "fail")    => "<div class='alert alert-danger py-2 mb-3'>Adjustment failed — please try again.</div>",
+                _              => ""
+            };
+
+            // Run all independent dashboard queries in parallel
+            var overviewTask       = GetAdminOverviewMetricsAsync(metricRange, selectedLocationId, logger);
+            var searchTask         = SearchAdminCustomersAsync(q, adminId, isGlobal, logger);
+            var customerTask       = selectedCustomerId.HasValue
+                ? GetAdminCustomerDetailAsync(selectedCustomerId.Value, logger)
+                : Task.FromResult<DataTable?>(null);
+            var customerOrdersTask = selectedCustomerId.HasValue
+                ? GetAdminCustomerOrdersAsync(selectedCustomerId.Value, logger)
+                : Task.FromResult<DataTable?>(null);
+            var customerPointsTask = selectedCustomerId.HasValue
+                ? GetAdminCustomerPointsAsync(selectedCustomerId.Value, logger)
+                : Task.FromResult<DataTable?>(null);
+            var customerCasesTask  = selectedCustomerId.HasValue
+                ? GetAdminCustomerCasesAsync(selectedCustomerId.Value, logger)
+                : Task.FromResult<DataTable?>(null);
+            var liveOrdersTask     = GetAdminLiveOrdersAsync(selectedLocationId, logger);
+            var salesTrendTask     = GetAdminSalesTrendAsync(grain, selectedLocationId, logger);
+            var activityTask       = GetAdminRecentActivityAsync(selectedLocationId, logger);
+            var popularItemsTask   = GetAdminPopularItemsAsync(grain, selectedLocationId, logger);
+            var paymentMixTask     = GetAdminPaymentMixAsync(grain, selectedLocationId, logger);
+            var pointsMixTask      = GetAdminPointsMixAsync(grain, selectedLocationId, logger);
+            var locationPerfTask   = GetAdminLocationPerformanceAsync(isGlobal, adminId, selectedLocationId, logger);
+
+            await Task.WhenAll(overviewTask, searchTask, customerTask, customerOrdersTask,
+                customerPointsTask, customerCasesTask, liveOrdersTask, salesTrendTask,
+                activityTask, popularItemsTask, paymentMixTask, pointsMixTask, locationPerfTask);
+
+            var overviewDt             = overviewTask.Result;
+            var searchDt               = searchTask.Result;
+            var selectedCustomerDt     = customerTask.Result;
+            var selectedCustomerOrdersDt = customerOrdersTask.Result;
+            var selectedCustomerPointsDt = customerPointsTask.Result;
+            var selectedCustomerCasesDt  = customerCasesTask.Result;
+            var liveOrdersDt           = liveOrdersTask.Result;
+            var salesTrendDt           = salesTrendTask.Result;
+            var activityDt             = activityTask.Result;
+            var popularItemsDt         = popularItemsTask.Result;
+            var paymentMixDt           = paymentMixTask.Result;
+            var pointsMixDt            = pointsMixTask.Result;
+            var locationPerfDt         = locationPerfTask.Result;
+
+            string body = RenderAdminDashboardBody(
+                adminDisplay,
+                adminRole,
+                isGlobal,
+                grain,
+                metricRange,
+                q,
+                selectedLocationId,
+                selectedCustomerId,
+                selectedOrderId,
+                adjAlert,
+                locationsDt,
+                overviewDt,
+                searchDt,
+                selectedCustomerDt,
+                selectedCustomerOrdersDt,
+                selectedCustomerPointsDt,
+                selectedCustomerCasesDt,
+                liveOrdersDt,
+                salesTrendDt,
+                activityDt,
+                popularItemsDt,
+                paymentMixDt,
+                pointsMixDt,
+                locationPerfDt);
+
+            return Results.Content(Layout("Admin Dashboard", null, body), "text/html");
         }
 
         // GET /login
@@ -1806,6 +2167,1153 @@ namespace WebAppWithDB_Starter_v2
 </div>";
 
             return Results.Content(Layout("Error", null, body), "text/html");
+        }
+
+        // ─── ADMIN HELPERS ───────────────────────────────────────────────────
+
+        private static string RowString(DataRow row, string columnName) =>
+            row.Table.Columns.Contains(columnName) && row[columnName] != DBNull.Value
+                ? row[columnName]?.ToString() ?? ""
+                : "";
+
+        private static int RowInt(DataRow row, string columnName) =>
+            row.Table.Columns.Contains(columnName) && row[columnName] != DBNull.Value
+                ? Convert.ToInt32(row[columnName])
+                : 0;
+
+        private static decimal RowDecimal(DataRow row, string columnName) =>
+            row.Table.Columns.Contains(columnName) && row[columnName] != DBNull.Value
+                ? Convert.ToDecimal(row[columnName])
+                : 0m;
+
+        private static DateTime? RowDate(DataRow row, string columnName) =>
+            row.Table.Columns.Contains(columnName) && row[columnName] != DBNull.Value
+                ? Convert.ToDateTime(row[columnName])
+                : null;
+
+        private static async Task<DataTable?> GetAdminAccessibleLocationsAsync(int adminId, bool isGlobal, ILogger? logger = null)
+        {
+            var cmd = new SqlCommand(isGlobal
+                ? @"
+                    SELECT LocationID,
+                           COALESCE(LOC_StoreName, 'Store #' + CAST(LocationID AS VARCHAR(10))) AS StoreName,
+                           COALESCE(LOC_City, '') AS City,
+                           COALESCE(LOC_State, '') AS State
+                    FROM Location
+                    ORDER BY COALESCE(LOC_StoreName, ''), LocationID"
+                : @"
+                    SELECT l.LocationID,
+                           COALESCE(l.LOC_StoreName, 'Store #' + CAST(l.LocationID AS VARCHAR(10))) AS StoreName,
+                           COALESCE(l.LOC_City, '') AS City,
+                           COALESCE(l.LOC_State, '') AS State
+                    FROM AdminLocationAccess ala
+                    JOIN Location l ON l.LocationID = ala.LocationID
+                    WHERE ala.AdminUserID = @adminId
+                    ORDER BY COALESCE(l.LOC_StoreName, ''), l.LocationID");
+
+            if (!isGlobal)
+                cmd.Parameters.AddWithValue("@adminId", adminId);
+
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static int? ResolveAdminLocationId(DataTable locationsDt, int? requestedLocationId, bool isGlobal)
+        {
+            if (locationsDt.Rows.Count == 0) return null;
+
+            if (!requestedLocationId.HasValue)
+                return isGlobal ? null : Convert.ToInt32(locationsDt.Rows[0]["LocationID"]);
+
+            foreach (DataRow row in locationsDt.Rows)
+                if (Convert.ToInt32(row["LocationID"]) == requestedLocationId.Value)
+                    return requestedLocationId.Value;
+
+            return isGlobal ? null : Convert.ToInt32(locationsDt.Rows[0]["LocationID"]);
+        }
+
+        private static async Task<int?> GetCustomerIdForAdminOrderAsync(int orderId, int? locationId, ILogger? logger = null)
+        {
+            string locationFilter = locationId.HasValue ? " AND o.LocationID = @loc" : "";
+            var cmd = new SqlCommand($@"
+                SELECT TOP 1 o.CustomerID
+                FROM [Order] o
+                WHERE o.OrderID = @oid{locationFilter}");
+            cmd.Parameters.AddWithValue("@oid", orderId);
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+
+            var dt = await FillDataTableViaCommandAsync(cmd, logger);
+            if (dt == null || dt.Rows.Count == 0) return null;
+            return Convert.ToInt32(dt.Rows[0]["CustomerID"]);
+        }
+
+        private static async Task<DataTable?> GetAdminOverviewMetricsAsync(string metricRange, int? locationId, ILogger? logger = null)
+        {
+            string orderFilter = locationId.HasValue ? " AND o.LocationID = @loc" : "";
+            string caseFilter = locationId.HasValue ? " AND sc.LocationID = @loc" : "";
+            string pointsFilter = locationId.HasValue ? " AND o.LocationID = @loc" : "";
+            string completedDateFilter = metricRange switch
+            {
+                "week" => " AND o.ORD_OrderDate >= DATEADD(DAY, -7, GETDATE())",
+                "month" => " AND o.ORD_OrderDate >= DATEADD(MONTH, -1, GETDATE())",
+                _ => " AND CAST(o.ORD_OrderDate AS DATE) = CAST(GETDATE() AS DATE)"
+            };
+            string pointsDateFilter = metricRange switch
+            {
+                "week" => " AND j.JWT_TransactionDate >= DATEADD(DAY, -7, GETDATE())",
+                "month" => " AND j.JWT_TransactionDate >= DATEADD(MONTH, -1, GETDATE())",
+                _ => " AND CAST(j.JWT_TransactionDate AS DATE) = CAST(GETDATE() AS DATE)"
+            };
+
+            var cmd = new SqlCommand($@"
+                SELECT
+                    (SELECT ISNULL(SUM(o.ORD_TotalAmount), 0)
+                     FROM [Order] o
+                     WHERE o.ORD_Status = 'Completed'
+                       {completedDateFilter}{orderFilter}) AS SalesTotal,
+                    (SELECT COUNT(1)
+                     FROM SupportCase sc
+                     WHERE sc.SC_Status IN ('Open', 'In Review'){caseFilter}) AS OpenCases,
+                    (SELECT COUNT(1)
+                     FROM [Order] o
+                     WHERE o.ORD_Status = 'Pending'{orderFilter}) AS PendingOrders,
+                    (SELECT CAST(ISNULL(AVG(CAST(o.ORD_TotalAmount AS DECIMAL(10,2))), 0) AS DECIMAL(10,2))
+                     FROM [Order] o
+                     WHERE o.ORD_Status = 'Completed'
+                       {completedDateFilter}{orderFilter}) AS AvgOrderValue,
+                    (SELECT ISNULL(SUM(ABS(j.JWT_PointsDelta)), 0)
+                     FROM JabberWonkTransaction j
+                     JOIN [Order] o ON o.OrderID = j.OrderID
+                     WHERE j.JWT_TransactionType = 'REDEEM'
+                       {pointsDateFilter}{pointsFilter}) AS PointsRedeemedTotal");
+
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> SearchAdminCustomersAsync(string q, int adminId, bool isGlobal, ILogger? logger = null)
+        {
+            // Non-global admins only see customers who have placed at least one order at an accessible location
+            string accessFilter = isGlobal
+                ? ""
+                : @"AND EXISTS (
+                      SELECT 1 FROM [Order] o2
+                      JOIN AdminLocationAccess ala ON ala.LocationID = o2.LocationID
+                      WHERE o2.CustomerID = c.CustomerID AND ala.AdminUserID = @adminId)";
+
+            var cmd = new SqlCommand($@"
+                SELECT TOP 8
+                    c.CustomerID, c.CUS_FirstName, c.CUS_LastName, c.CUS_Username,
+                    c.CUS_Email, c.CUS_Phone, c.CUS_PointsBalance
+                FROM Customer c
+                WHERE (@q = ''
+                   OR c.CUS_FirstName LIKE @like
+                   OR c.CUS_LastName LIKE @like
+                   OR c.CUS_Username LIKE @like
+                   OR ISNULL(c.CUS_Email, '') LIKE @like
+                   OR ISNULL(c.CUS_Phone, '') LIKE @like)
+                {accessFilter}
+                ORDER BY CASE WHEN c.CUS_Username = @q THEN 0 ELSE 1 END,
+                         c.CustomerID DESC");
+            cmd.Parameters.AddWithValue("@q", q);
+            cmd.Parameters.AddWithValue("@like", $"%{q}%");
+            if (!isGlobal) cmd.Parameters.AddWithValue("@adminId", adminId);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminCustomerDetailAsync(int customerId, ILogger? logger = null)
+        {
+            var cmd = new SqlCommand(@"
+                SELECT TOP 1
+                    CustomerID, CUS_FirstName, CUS_LastName, CUS_Username, CUS_Email,
+                    CUS_Phone, CUS_Address, CUS_City, CUS_State, CUS_ZipCode, CUS_PointsBalance
+                FROM Customer
+                WHERE CustomerID = @cid");
+            cmd.Parameters.AddWithValue("@cid", customerId);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminCustomerOrdersAsync(int customerId, ILogger? logger = null)
+        {
+            var cmd = new SqlCommand(@"
+                SELECT TOP 6
+                    o.OrderID, o.ORD_OrderDate, o.ORD_Status, o.ORD_TotalAmount,
+                    COALESCE(l.LOC_StoreName, 'Unknown') AS StoreName,
+                    COALESCE(p.PAY_TypeName, 'Unknown') AS PaymentType
+                FROM [Order] o
+                LEFT JOIN Location l ON l.LocationID = o.LocationID
+                LEFT JOIN PaymentType p ON p.PaymentTypeID = o.PaymentTypeID
+                WHERE o.CustomerID = @cid
+                ORDER BY o.ORD_OrderDate DESC");
+            cmd.Parameters.AddWithValue("@cid", customerId);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminCustomerPointsAsync(int customerId, ILogger? logger = null)
+        {
+            var cmd = new SqlCommand(@"
+                SELECT TOP 8
+                    JWT_TransactionDate, JWT_TransactionType, JWT_PointsDelta,
+                    JWT_BalanceAfter, OrderID, JWT_Notes
+                FROM JabberWonkTransaction
+                WHERE CustomerID = @cid
+                ORDER BY JWT_TransactionDate DESC");
+            cmd.Parameters.AddWithValue("@cid", customerId);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminCustomerCasesAsync(int customerId, ILogger? logger = null)
+        {
+            var cmd = new SqlCommand(@"
+                SELECT TOP 6
+                    sc.SupportCaseID, sc.SC_Status, sc.SC_Priority, sc.SC_Category,
+                    sc.SC_Subject, sc.SC_CreatedAt,
+                    COALESCE(a.ADM_DisplayName, a.ADM_Username, 'Unassigned') AS AssignedAdmin
+                FROM SupportCase sc
+                LEFT JOIN AdminUser a ON a.AdminUserID = sc.AssignedToAdminUserID
+                WHERE sc.CustomerID = @cid
+                ORDER BY sc.SC_CreatedAt DESC");
+            cmd.Parameters.AddWithValue("@cid", customerId);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminLiveOrdersAsync(int? locationId, ILogger? logger = null)
+        {
+            string locationFilter = locationId.HasValue ? " AND o.LocationID = @loc" : "";
+            var cmd = new SqlCommand($@"
+                SELECT TOP 12
+                    o.OrderID,
+                    o.CustomerID,
+                    o.ORD_OrderDate,
+                    o.ORD_Status,
+                    o.ORD_TotalAmount,
+                    DATEDIFF(MINUTE, o.ORD_OrderDate, GETDATE()) AS AgeMinutes,
+                    COALESCE(c.CUS_Username, 'guest') AS Username,
+                    COALESCE(l.LOC_StoreName, 'Unknown') AS StoreName,
+                    COALESCE(p.PAY_TypeName, 'Unknown') AS PaymentType
+                FROM [Order] o
+                JOIN Customer c ON c.CustomerID = o.CustomerID
+                LEFT JOIN Location l ON l.LocationID = o.LocationID
+                LEFT JOIN PaymentType p ON p.PaymentTypeID = o.PaymentTypeID
+                WHERE o.ORD_Status IN ('Pending', 'Completed', 'Cancelled')
+                  AND (o.ORD_Status = 'Pending' OR o.ORD_OrderDate >= DATEADD(DAY, -1, GETDATE())){locationFilter}
+                ORDER BY CASE WHEN o.ORD_Status = 'Pending' THEN 0 ELSE 1 END,
+                         o.ORD_OrderDate DESC");
+
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminSalesTrendAsync(string grain, int? locationId, ILogger? logger = null)
+        {
+            string locationFilter = locationId.HasValue ? " AND o.LocationID = @loc" : "";
+            string sql = grain switch
+            {
+                "hour" => $@"
+                    SELECT
+                        CONVERT(VARCHAR(5), DATEADD(HOUR, DATEDIFF(HOUR, 0, o.ORD_OrderDate), 0), 108) AS BucketLabel,
+                        DATEADD(HOUR, DATEDIFF(HOUR, 0, o.ORD_OrderDate), 0) AS BucketSort,
+                        COUNT(1) AS OrderCount,
+                        ISNULL(SUM(o.ORD_TotalAmount), 0) AS Sales
+                    FROM [Order] o
+                    WHERE o.ORD_Status = 'Completed'
+                      AND CAST(o.ORD_OrderDate AS DATE) = CAST(GETDATE() AS DATE){locationFilter}
+                    GROUP BY DATEADD(HOUR, DATEDIFF(HOUR, 0, o.ORD_OrderDate), 0)
+                    ORDER BY BucketSort",
+                "week" => $@"
+                    SELECT
+                        CONCAT('Week of ', CONVERT(VARCHAR(10), DATEADD(WEEK, DATEDIFF(WEEK, 0, o.ORD_OrderDate), 0), 120)) AS BucketLabel,
+                        DATEADD(WEEK, DATEDIFF(WEEK, 0, o.ORD_OrderDate), 0) AS BucketSort,
+                        COUNT(1) AS OrderCount,
+                        ISNULL(SUM(o.ORD_TotalAmount), 0) AS Sales
+                    FROM [Order] o
+                    WHERE o.ORD_Status = 'Completed'
+                      AND o.ORD_OrderDate >= DATEADD(WEEK, -7, GETDATE()){locationFilter}
+                    GROUP BY DATEADD(WEEK, DATEDIFF(WEEK, 0, o.ORD_OrderDate), 0)
+                    ORDER BY BucketSort",
+                _ => $@"
+                    SELECT
+                        CONVERT(VARCHAR(10), CAST(o.ORD_OrderDate AS DATE), 120) AS BucketLabel,
+                        CAST(o.ORD_OrderDate AS DATE) AS BucketSort,
+                        COUNT(1) AS OrderCount,
+                        ISNULL(SUM(o.ORD_TotalAmount), 0) AS Sales
+                    FROM [Order] o
+                    WHERE o.ORD_Status = 'Completed'
+                      AND o.ORD_OrderDate >= DATEADD(DAY, -6, CAST(GETDATE() AS DATE)){locationFilter}
+                    GROUP BY CAST(o.ORD_OrderDate AS DATE)
+                    ORDER BY BucketSort"
+            };
+
+            var cmd = new SqlCommand(sql);
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminRecentActivityAsync(int? locationId, ILogger? logger = null)
+        {
+            string orderFilter = locationId.HasValue ? " WHERE o.LocationID = @loc" : "";
+            string pointsFilter = locationId.HasValue ? " WHERE o.LocationID = @loc" : "";
+            string caseFilter = locationId.HasValue ? " WHERE sc.LocationID = @loc" : "";
+            string auditFilter = locationId.HasValue ? " WHERE a.LocationID = @loc" : "";
+
+            var cmd = new SqlCommand($@"
+                SELECT TOP 50 ActivityAt, ActivityType, Title, Detail
+                FROM (
+                    SELECT
+                        o.ORD_OrderDate AS ActivityAt,
+                        'Order' AS ActivityType,
+                        CONCAT('Order #', o.OrderID, ' ', o.ORD_Status) AS Title,
+                        CONCAT(COALESCE(c.CUS_Username, 'guest'), ' at ', COALESCE(l.LOC_StoreName, 'Unknown')) AS Detail
+                    FROM [Order] o
+                    JOIN Customer c ON c.CustomerID = o.CustomerID
+                    LEFT JOIN Location l ON l.LocationID = o.LocationID
+                    {orderFilter}
+
+                    UNION ALL
+
+                    SELECT
+                        j.JWT_TransactionDate AS ActivityAt,
+                        'Points' AS ActivityType,
+                        CONCAT(j.JWT_TransactionType, ' on Order #', j.OrderID) AS Title,
+                        CONCAT(COALESCE(c.CUS_Username, 'guest'), ' delta ', j.JWT_PointsDelta) AS Detail
+                    FROM JabberWonkTransaction j
+                    JOIN Customer c ON c.CustomerID = j.CustomerID
+                    JOIN [Order] o ON o.OrderID = j.OrderID
+                    {pointsFilter}
+
+                    UNION ALL
+
+                    SELECT
+                        sc.SC_CreatedAt AS ActivityAt,
+                        'Case' AS ActivityType,
+                        CONCAT(sc.SC_Category, ': ', sc.SC_Subject) AS Title,
+                        CONCAT('Status ', sc.SC_Status, ' / Priority ', sc.SC_Priority) AS Detail
+                    FROM SupportCase sc
+                    {caseFilter}
+
+                    UNION ALL
+
+                    SELECT
+                        a.AAL_CreatedAt AS ActivityAt,
+                        'Admin' AS ActivityType,
+                        CONCAT(a.AAL_ActionType, ' ', a.AAL_EntityType) AS Title,
+                        ISNULL(a.AAL_Details, 'No details recorded') AS Detail
+                    FROM AdminAuditLog a
+                    {auditFilter}
+                ) src
+                ORDER BY ActivityAt DESC");
+
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminPopularItemsAsync(string grain, int? locationId, ILogger? logger = null)
+        {
+            string dateFilter = grain == "week"
+                ? " AND o.ORD_OrderDate >= DATEADD(DAY, -7, GETDATE())"
+                : " AND CAST(o.ORD_OrderDate AS DATE) = CAST(GETDATE() AS DATE)";
+            string locationFilter = locationId.HasValue ? " AND o.LocationID = @loc" : "";
+
+            var cmd = new SqlCommand($@"
+                SELECT TOP 6
+                    i.ItemID,
+                    i.ITM_ItemName,
+                    COALESCE(i.ITM_Category, 'Uncategorized') AS ITM_Category,
+                    SUM(oi.ORI_Quantity) AS UnitsSold,
+                    SUM(oi.ORI_Quantity * oi.ORI_UnitPrice) AS Revenue
+                FROM OrderItem oi
+                JOIN [Order] o ON o.OrderID = oi.OrderID
+                JOIN Item i ON i.ItemID = oi.ItemID
+                WHERE o.ORD_Status = 'Completed'{dateFilter}{locationFilter}
+                GROUP BY i.ItemID, i.ITM_ItemName, i.ITM_Category
+                ORDER BY UnitsSold DESC, Revenue DESC");
+
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminPaymentMixAsync(string grain, int? locationId, ILogger? logger = null)
+        {
+            string dateFilter = grain == "week"
+                ? " AND o.ORD_OrderDate >= DATEADD(DAY, -7, GETDATE())"
+                : grain == "hour"
+                    ? " AND CAST(o.ORD_OrderDate AS DATE) = CAST(GETDATE() AS DATE)"
+                    : " AND o.ORD_OrderDate >= DATEADD(DAY, -6, CAST(GETDATE() AS DATE))";
+            string locationFilter = locationId.HasValue ? " AND o.LocationID = @loc" : "";
+
+            var cmd = new SqlCommand($@"
+                SELECT
+                    COALESCE(p.PAY_TypeName, 'Unknown') AS PaymentType,
+                    COUNT(1) AS OrderCount,
+                    ISNULL(SUM(o.ORD_TotalAmount), 0) AS Sales
+                FROM [Order] o
+                LEFT JOIN PaymentType p ON p.PaymentTypeID = o.PaymentTypeID
+                WHERE o.ORD_Status = 'Completed'{dateFilter}{locationFilter}
+                GROUP BY COALESCE(p.PAY_TypeName, 'Unknown')
+                ORDER BY OrderCount DESC, Sales DESC");
+
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminPointsMixAsync(string grain, int? locationId, ILogger? logger = null)
+        {
+            string dateFilter = grain == "week"
+                ? " AND j.JWT_TransactionDate >= DATEADD(DAY, -7, GETDATE())"
+                : grain == "hour"
+                    ? " AND CAST(j.JWT_TransactionDate AS DATE) = CAST(GETDATE() AS DATE)"
+                    : " AND j.JWT_TransactionDate >= DATEADD(DAY, -6, CAST(GETDATE() AS DATE))";
+            string locationFilter = locationId.HasValue ? " AND o.LocationID = @loc" : "";
+
+            var cmd = new SqlCommand($@"
+                SELECT
+                    ISNULL(SUM(CASE WHEN j.JWT_TransactionType = 'EARN' THEN j.JWT_PointsDelta ELSE 0 END), 0) AS PointsEarned,
+                    ISNULL(SUM(CASE WHEN j.JWT_TransactionType = 'REDEEM' THEN ABS(j.JWT_PointsDelta) ELSE 0 END), 0) AS PointsRedeemed,
+                    ISNULL(SUM(CASE WHEN j.JWT_TransactionType = 'REFUND' THEN j.JWT_PointsDelta ELSE 0 END), 0) AS PointsRefunded
+                FROM JabberWonkTransaction j
+                JOIN [Order] o ON o.OrderID = j.OrderID
+                WHERE 1 = 1{dateFilter}{locationFilter}");
+
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static async Task<DataTable?> GetAdminLocationPerformanceAsync(bool isGlobal, int adminId, int? locationId, ILogger? logger = null)
+        {
+            string accessJoin = isGlobal
+                ? ""
+                : "JOIN AdminLocationAccess ala ON ala.LocationID = l.LocationID AND ala.AdminUserID = @adminId";
+            string locationFilter = locationId.HasValue ? " AND l.LocationID = @loc" : "";
+
+            var cmd = new SqlCommand($@"
+                SELECT
+                    l.LocationID,
+                    COALESCE(l.LOC_StoreName, 'Store #' + CAST(l.LocationID AS VARCHAR(10))) AS StoreName,
+                    COUNT(CASE WHEN o.ORD_Status = 'Completed' THEN 1 END) AS CompletedOrders,
+                    COUNT(CASE WHEN o.ORD_Status = 'Pending' THEN 1 END) AS PendingOrders,
+                    COUNT(CASE WHEN o.ORD_Status = 'Cancelled' THEN 1 END) AS CancelledOrders,
+                    CAST(ISNULL(SUM(CASE WHEN o.ORD_Status = 'Completed' THEN o.ORD_TotalAmount ELSE 0 END), 0) AS DECIMAL(10,2)) AS Revenue,
+                    CAST(ISNULL(AVG(CASE WHEN o.ORD_Status = 'Completed' THEN o.ORD_TotalAmount END), 0) AS DECIMAL(10,2)) AS AvgTicket
+                FROM Location l
+                {accessJoin}
+                LEFT JOIN [Order] o
+                    ON o.LocationID = l.LocationID
+                   AND o.ORD_OrderDate >= DATEADD(DAY, -7, GETDATE())
+                WHERE 1 = 1{locationFilter}
+                GROUP BY l.LocationID, l.LOC_StoreName
+                ORDER BY Revenue DESC, CompletedOrders DESC");
+
+            if (!isGlobal) cmd.Parameters.AddWithValue("@adminId", adminId);
+            if (locationId.HasValue) cmd.Parameters.AddWithValue("@loc", locationId.Value);
+            return await FillDataTableViaCommandAsync(cmd, logger);
+        }
+
+        private static string RenderAdminSetupBody(string adminDisplay, string headline, string detail)
+        {
+            return $@"
+<div class='container py-5'>
+  <div class='row justify-content-center'>
+    <div class='col-lg-8'>
+      <div class='card shadow border-warning border-2'>
+        <div class='card-body p-5'>
+          <span class='badge rounded-pill border border-danger bg-white px-3 py-2 fw-semibold mb-3'
+                style='color:#b91c1c;'>Demo Admin</span>
+          <h1 class='jj-brand fw-bold mb-3' style='color:#ea580c;'>Admin Dashboard</h1>
+          <p class='text-muted'>Signed in as {H(adminDisplay)}</p>
+          <div class='alert alert-warning mb-4'>
+            <strong>{H(headline)}</strong><br>{H(detail)}
+          </div>
+          <div class='d-flex gap-2 flex-wrap'>
+            <a class='btn btn-danger fw-semibold' href='/admin/login'>Back to Admin Login</a>
+            <a class='btn btn-outline-secondary' href='/'>Return to Site</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminDashboardBody(
+            string adminDisplay,
+            string adminRole,
+            bool isGlobal,
+            string grain,
+            string metricRange,
+            string q,
+            int? selectedLocationId,
+            int? selectedCustomerId,
+            int? selectedOrderId,
+            string adjAlert,
+            DataTable locationsDt,
+            DataTable? overviewDt,
+            DataTable? searchDt,
+            DataTable? selectedCustomerDt,
+            DataTable? selectedCustomerOrdersDt,
+            DataTable? selectedCustomerPointsDt,
+            DataTable? selectedCustomerCasesDt,
+            DataTable? liveOrdersDt,
+            DataTable? salesTrendDt,
+            DataTable? activityDt,
+            DataTable? popularItemsDt,
+            DataTable? paymentMixDt,
+            DataTable? pointsMixDt,
+            DataTable? locationPerfDt)
+        {
+            string locationOptions = isGlobal
+                ? $"<option value=''{(!selectedLocationId.HasValue ? " selected" : "")}>All stores</option>"
+                : "";
+
+            foreach (DataRow row in locationsDt.Rows)
+            {
+                int id = Convert.ToInt32(row["LocationID"]);
+                string selected = selectedLocationId == id ? " selected" : "";
+                string label = H($"{RowString(row, "StoreName")} {RowString(row, "City")} {RowString(row, "State")}".Trim());
+                locationOptions += $"<option value='{id}'{selected}>{label}</option>";
+            }
+
+            string body = $@"
+<style>
+  .admin-shell .admin-card {{ border: 1px solid #e5e7eb; border-radius: 1rem; box-shadow: 0 0.5rem 1rem rgba(0,0,0,.06); }}
+  .admin-shell .metric-card {{ background: linear-gradient(180deg, #fff 0%, #fff7ed 100%); }}
+  .admin-shell .section-title {{ font-size: 1.05rem; font-weight: 700; color: #7c2d12; }}
+  .admin-shell .mini-label {{ font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; }}
+  .admin-shell .search-link {{ text-decoration: none; }}
+  .admin-shell .trend-bar {{ height: 10px; background: #fdba74; border-radius: 999px; }}
+  .admin-shell .subtle-box {{ background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: .85rem; }}
+  .admin-shell .activity-scroll {{ max-height: 30rem; overflow-y: auto; padding-right: .25rem; }}
+  .admin-shell .activity-entry {{ display: flex; align-items: center; gap: .75rem; white-space: nowrap; overflow: hidden; }}
+  .admin-shell .activity-entry > * {{ min-width: 0; }}
+  .admin-shell .activity-time {{ flex: 0 0 9rem; color: #6b7280; font-size: .85rem; }}
+  .admin-shell .activity-type {{ flex: 0 0 auto; }}
+  .admin-shell .activity-title {{ flex: 0 1 18rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }}
+  .admin-shell .activity-detail {{ flex: 1 1 auto; color: #6b7280; overflow: hidden; text-overflow: ellipsis; }}
+  @media (max-width: 991.98px) {{
+    .admin-shell .activity-entry {{ display: block; white-space: normal; }}
+    .admin-shell .activity-time {{ display: block; margin-bottom: .35rem; }}
+    .admin-shell .activity-type {{ display: inline-flex; margin-right: .5rem; margin-bottom: .35rem; }}
+    .admin-shell .activity-title,
+    .admin-shell .activity-detail {{ display: block; overflow: visible; text-overflow: clip; }}
+  }}
+</style>
+<div class='container-fluid py-4 admin-shell'>
+  <div class='d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4'>
+    <div>
+      <div class='d-flex align-items-center gap-2 mb-2'>
+        <span class='badge rounded-pill border border-danger bg-white px-3 py-2 fw-semibold'
+              style='color:#b91c1c;'>Demo Admin</span>
+        <span class='badge text-bg-dark'>{H(adminRole)}</span>
+        <span class='badge text-bg-secondary'>{(isGlobal ? "Global Access" : "Local Access")}</span>
+      </div>
+      <h1 class='jj-brand fw-bold mb-1' style='color:#ea580c;'>Admin Dashboard</h1>
+      <p class='text-muted mb-0'>Signed in as {H(adminDisplay)}</p>
+    </div>
+    <div class='d-flex gap-2 flex-wrap'>
+      <a class='btn btn-outline-secondary' href='/home'>Customer Home</a>
+      <a class='btn btn-danger' href='/admin/logout'>Admin Logout</a>
+    </div>
+  </div>
+
+  <div class='row g-3 mb-4'>
+    <div class='col-xl-8'>
+      <div class='card admin-card'>
+        <div class='card-body'>
+          <div class='section-title mb-3'>Dashboard Filters</div>
+          <form method='get' action='/admin' class='row g-3 align-items-end'>
+            <div class='col-md-4'>
+              <label class='form-label fw-semibold'>Store</label>
+                      <select class='form-select' name='locationId'>{locationOptions}</select>
+            </div>
+            <div class='col-md-3'>
+              <label class='form-label fw-semibold'>Trend View</label>
+              <select class='form-select' name='grain'>
+                <option value='day'{(grain == "day" ? " selected" : "")}>Day</option>
+                <option value='hour'{(grain == "hour" ? " selected" : "")}>Hour</option>
+                <option value='week'{(grain == "week" ? " selected" : "")}>Week</option>
+              </select>
+            </div>
+            <div class='col-md-5'>
+              <label class='form-label fw-semibold'>Customer or Order Search</label>
+              <input class='form-control' type='text' name='q' value='{H(q)}'
+                     placeholder='Search username, name, email, phone'>
+            </div>
+            <input type='hidden' name='metricRange' value='{H(metricRange)}'>
+            <div class='col-12 d-flex gap-2 flex-wrap'>
+              <button class='btn btn-warning fw-semibold' type='submit'>Apply Filters</button>
+              <a class='btn btn-outline-secondary' href='/admin'>Reset</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class='col-xl-4'>
+      {RenderAdminMetricCards(overviewDt, metricRange, grain, selectedLocationId, q, selectedCustomerId, selectedOrderId)}
+    </div>
+  </div>
+
+  <div class='row g-4'>
+    <div class='col-xxl-4 col-xl-5'>
+      {RenderAdminCustomerWorkspace(q, grain, metricRange, selectedLocationId, selectedCustomerId, selectedOrderId, searchDt, selectedCustomerDt, selectedCustomerOrdersDt, selectedCustomerCasesDt)}
+      <div class='mt-4'>
+        {RenderAdminPointsManager(selectedCustomerDt, selectedCustomerPointsDt, grain, metricRange, selectedLocationId, q, adjAlert)}
+      </div>
+    </div>
+    <div class='col-xxl-5 col-xl-7'>
+      {RenderAdminLiveOrders(grain, metricRange, selectedLocationId, liveOrdersDt)}
+      <div class='mt-4'>
+        {RenderAdminSalesTrend(grain, salesTrendDt)}
+      </div>
+    </div>
+    <div class='col-xxl-3 col-xl-12'>
+      {RenderAdminPopularItems(popularItemsDt)}
+      <div class='mt-4'>
+        {RenderAdminPaymentMix(paymentMixDt, pointsMixDt)}
+      </div>
+    </div>
+  </div>
+
+  <div class='row g-4 mt-1'>
+    <div class='col-12'>
+      {RenderAdminLocationPerformance(locationPerfDt, isGlobal)}
+    </div>
+  </div>
+  <div class='row g-4 mt-1'>
+    <div class='col-12'>
+      {RenderAdminActivityFeed(activityDt)}
+    </div>
+  </div>
+</div>";
+
+            return body;
+        }
+
+        private static string RenderAdminMetricCards(DataTable? overviewDt, string metricRange, string grain,
+            int? locationId, string q, int? selectedCustomerId, int? selectedOrderId)
+        {
+            decimal sales = 0m;
+            int openCases = 0;
+            int pendingOrders = 0;
+            decimal avgOrder = 0m;
+            int redeemedPoints = 0;
+            string rangeLabel = metricRange switch
+            {
+                "week" => "This Week",
+                "month" => "This Month",
+                _ => "Today"
+            };
+
+            if (overviewDt != null && overviewDt.Rows.Count > 0)
+            {
+                var row = overviewDt.Rows[0];
+                sales = RowDecimal(row, "SalesTotal");
+                openCases = RowInt(row, "OpenCases");
+                pendingOrders = RowInt(row, "PendingOrders");
+                avgOrder = RowDecimal(row, "AvgOrderValue");
+                redeemedPoints = RowInt(row, "PointsRedeemedTotal");
+            }
+
+            string dayUrl = BuildAdminUrl(grain, locationId, q, selectedCustomerId, selectedOrderId, "day");
+            string weekUrl = BuildAdminUrl(grain, locationId, q, selectedCustomerId, selectedOrderId, "week");
+            string monthUrl = BuildAdminUrl(grain, locationId, q, selectedCustomerId, selectedOrderId, "month");
+
+            return $@"
+<div class='card admin-card metric-card h-100'>
+  <div class='card-body'>
+    <div class='d-flex justify-content-between align-items-center gap-2 mb-3'>
+      <div class='section-title mb-0'>At-a-Glance Metrics</div>
+      <div class='btn-group btn-group-sm' role='group' aria-label='Metrics range'>
+        <a class='btn {(metricRange == "day" ? "btn-danger" : "btn-outline-danger")}' href='{dayUrl}'>D</a>
+        <a class='btn {(metricRange == "week" ? "btn-danger" : "btn-outline-danger")}' href='{weekUrl}'>W</a>
+        <a class='btn {(metricRange == "month" ? "btn-danger" : "btn-outline-danger")}' href='{monthUrl}'>M</a>
+      </div>
+    </div>
+    <div class='small text-muted mb-3'>Current overview range: {H(rangeLabel)}</div>
+    <div class='row g-3'>
+      <div class='col-sm-6'>
+        <div class='subtle-box p-3 h-100'>
+          <div class='mini-label'>{H(rangeLabel)} Sales</div>
+          <div class='fs-4 fw-bold text-success'>${sales:F2}</div>
+        </div>
+      </div>
+      <div class='col-sm-6'>
+        <div class='subtle-box p-3 h-100'>
+          <div class='mini-label'>Open Cases</div>
+          <div class='fs-4 fw-bold'>{openCases}</div>
+        </div>
+      </div>
+      <div class='col-sm-6'>
+        <div class='subtle-box p-3 h-100'>
+          <div class='mini-label'>Pending Orders</div>
+          <div class='fs-4 fw-bold'>{pendingOrders}</div>
+        </div>
+      </div>
+      <div class='col-sm-6'>
+        <div class='subtle-box p-3 h-100'>
+          <div class='mini-label'>Avg Order Value</div>
+          <div class='fs-4 fw-bold'>${avgOrder:F2}</div>
+        </div>
+      </div>
+      <div class='col-12'>
+        <div class='subtle-box p-3'>
+          <div class='mini-label'>Points Redeemed {H(rangeLabel)}</div>
+          <div class='fs-4 fw-bold text-warning-emphasis'>{redeemedPoints:N0} pts</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminCustomerWorkspace(string q, string grain, string metricRange, int? locationId,
+            int? selectedCustomerId, int? selectedOrderId, DataTable? searchDt, DataTable? customerDt,
+            DataTable? ordersDt, DataTable? casesDt)
+        {
+            var results = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                if (searchDt == null || searchDt.Rows.Count == 0)
+                {
+                    results.Append("<div class='alert alert-light border'>No customer matches found for this search.</div>");
+                }
+                else
+                {
+                    results.Append("<div class='list-group mb-3'>");
+                    foreach (DataRow row in searchDt.Rows)
+                    {
+                        int cid = RowInt(row, "CustomerID");
+                        string link = BuildAdminUrl(grain, locationId, q, cid, null, metricRange);
+                        string name = H($"{RowString(row, "CUS_FirstName")} {RowString(row, "CUS_LastName")}".Trim());
+                        string username = H(RowString(row, "CUS_Username"));
+                        string email = H(RowString(row, "CUS_Email"));
+                        string active = selectedCustomerId == cid ? " active" : "";
+                        results.Append($@"
+<a class='list-group-item list-group-item-action{active} search-link' href='{link}'>
+  <div class='d-flex justify-content-between align-items-center'>
+    <div>
+      <div class='fw-semibold'>{name} <span class='text-muted'>@{username}</span></div>
+      <div class='small text-muted'>{email}</div>
+    </div>
+    <span class='badge text-bg-warning'>{RowInt(row, "CUS_PointsBalance"):N0} pts</span>
+  </div>
+</a>");
+                    }
+                    results.Append("</div>");
+                }
+            }
+
+            string detailHtml = "<div class='alert alert-light border mb-0'>Search for a customer to view profile, orders, and support cases.</div>";
+
+            if (customerDt != null && customerDt.Rows.Count > 0)
+            {
+                DataRow customer = customerDt.Rows[0];
+                string name = H($"{RowString(customer, "CUS_FirstName")} {RowString(customer, "CUS_LastName")}".Trim());
+                string username = H(RowString(customer, "CUS_Username"));
+                string email = H(RowString(customer, "CUS_Email"));
+                string phone = H(RowString(customer, "CUS_Phone"));
+                string address = H($"{RowString(customer, "CUS_Address")} {RowString(customer, "CUS_City")} {RowString(customer, "CUS_State")} {RowString(customer, "CUS_ZipCode")}".Trim());
+
+                var ordersHtml = new StringBuilder();
+                if (ordersDt == null || ordersDt.Rows.Count == 0)
+                {
+                    ordersHtml.Append("<div class='small text-muted'>No orders found.</div>");
+                }
+                else
+                {
+                    ordersHtml.Append("<div class='table-responsive'><table class='table table-sm align-middle mb-0'><thead><tr><th>Order</th><th>Status</th><th>Total</th></tr></thead><tbody>");
+                    foreach (DataRow row in ordersDt.Rows)
+                    {
+                        int orderId = RowInt(row, "OrderID");
+                        string link = BuildAdminUrl(grain, locationId, q, selectedCustomerId, orderId, metricRange);
+                        ordersHtml.Append($@"
+<tr>
+  <td><a href='{link}'>#{orderId}</a><div class='small text-muted'>{H(RowString(row, "StoreName"))}</div></td>
+  <td>{H(RowString(row, "ORD_Status"))}</td>
+  <td>${RowDecimal(row, "ORD_TotalAmount"):F2}</td>
+</tr>");
+                    }
+                    ordersHtml.Append("</tbody></table></div>");
+                }
+
+                var casesHtml = new StringBuilder();
+                if (casesDt == null || casesDt.Rows.Count == 0)
+                {
+                    casesHtml.Append("<div class='small text-muted'>No support cases recorded.</div>");
+                }
+                else
+                {
+                    casesHtml.Append("<div class='table-responsive'><table class='table table-sm align-middle mb-0'><thead><tr><th>Case</th><th>Status</th><th>Priority</th></tr></thead><tbody>");
+                    foreach (DataRow row in casesDt.Rows)
+                    {
+                        casesHtml.Append($@"
+<tr>
+  <td>#{RowInt(row, "SupportCaseID")}<div class='small text-muted'>{H(RowString(row, "SC_Subject"))}</div></td>
+  <td>{H(RowString(row, "SC_Status"))}</td>
+  <td>{H(RowString(row, "SC_Priority"))}</td>
+</tr>");
+                    }
+                    casesHtml.Append("</tbody></table></div>");
+                }
+
+                detailHtml = $@"
+<div class='subtle-box p-3 mb-3'>
+  <div class='d-flex justify-content-between align-items-start gap-2'>
+    <div>
+      <div class='fw-bold fs-5'>{name}</div>
+      <div class='text-muted'>@{username}</div>
+    </div>
+    <span class='badge text-bg-warning'>{RowInt(customer, "CUS_PointsBalance"):N0} pts</span>
+  </div>
+  <div class='mt-3 small'>
+    <div><strong>Email:</strong> {email}</div>
+    <div><strong>Phone:</strong> {phone}</div>
+    <div><strong>Address:</strong> {address}</div>
+    {(selectedOrderId.HasValue ? $"<div><strong>Focused Order:</strong> #{selectedOrderId.Value}</div>" : "")}
+  </div>
+</div>
+<div class='row g-3'>
+  <div class='col-lg-6'>
+    <div class='subtle-box p-3 h-100'>
+      <div class='mini-label mb-2'>Recent Orders</div>
+      {ordersHtml}
+    </div>
+  </div>
+  <div class='col-lg-6'>
+    <div class='subtle-box p-3 h-100'>
+      <div class='mini-label mb-2'>Support Cases</div>
+      {casesHtml}
+    </div>
+  </div>
+</div>";
+            }
+
+            return $@"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='section-title mb-3'>1. Customer Lookup and Case Workspace</div>
+    <div class='small text-muted mb-3'>Search for a customer, review their account, and use this panel as the starting point for service issues.</div>
+    {results}
+    {detailHtml}
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminPointsManager(DataTable? customerDt, DataTable? pointsDt,
+            string grain, string metricRange, int? locationId, string q, string adjAlert)
+        {
+            if (customerDt == null || customerDt.Rows.Count == 0)
+            {
+                return @"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='section-title mb-3'>2. JabberWonk Points Manager</div>
+    <div class='alert alert-light border mb-0'>Select a customer to inspect loyalty history and points behavior.</div>
+  </div>
+</div>";
+            }
+
+            DataRow customer = customerDt.Rows[0];
+            int customerId = RowInt(customer, "CustomerID");
+            string returnUrl = BuildAdminUrl(grain, locationId, q, customerId, null, metricRange);
+
+            var history = new StringBuilder();
+            if (pointsDt == null || pointsDt.Rows.Count == 0)
+            {
+                history.Append("<div class='small text-muted'>No loyalty transactions recorded.</div>");
+            }
+            else
+            {
+                history.Append("<div class='table-responsive'><table class='table table-sm mb-0'><thead><tr><th>Date</th><th>Type</th><th>Delta</th><th>Balance</th></tr></thead><tbody>");
+                foreach (DataRow row in pointsDt.Rows)
+                {
+                    history.Append($@"
+<tr>
+  <td>{H(RowDate(row, "JWT_TransactionDate")?.ToString("MMM d, h:mm tt") ?? "")}</td>
+  <td>{H(RowString(row, "JWT_TransactionType"))}</td>
+  <td>{RowInt(row, "JWT_PointsDelta"):N0}</td>
+  <td>{RowInt(row, "JWT_BalanceAfter"):N0}</td>
+</tr>");
+                }
+                history.Append("</tbody></table></div>");
+            }
+
+            return $@"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='section-title mb-3'>2. JabberWonk Points Manager</div>
+    {adjAlert}
+    <div class='d-flex justify-content-between align-items-center mb-3'>
+      <div>
+        <div class='fw-semibold'>{H(RowString(customer, "CUS_Username"))}</div>
+        <div class='small text-muted'>Current loyalty balance</div>
+      </div>
+      <div class='fs-4 fw-bold text-warning-emphasis'>{RowInt(customer, "CUS_PointsBalance"):N0} pts</div>
+    </div>
+    <form method='post' action='/admin/points-adjust' class='subtle-box p-3 mb-3'>
+      <div class='mini-label mb-2'>Manual Adjustment</div>
+      <input type='hidden' name='customerId' value='{customerId}'>
+      <input type='hidden' name='grain' value='{H(grain)}'>
+      <input type='hidden' name='metricRange' value='{H(metricRange)}'>
+      <input type='hidden' name='locationId' value='{(locationId.HasValue ? locationId.Value.ToString() : "")}'>
+      <input type='hidden' name='q' value='{H(q)}'>
+      <div class='row g-2 align-items-end'>
+        <div class='col-sm-4'>
+          <label class='form-label mini-label mb-1'>Delta (+ add / − deduct)</label>
+          <input type='number' class='form-control form-control-sm' name='delta'
+                 placeholder='e.g. 100 or -50' required>
+        </div>
+        <div class='col-sm-5'>
+          <label class='form-label mini-label mb-1'>Reason</label>
+          <input type='text' class='form-control form-control-sm' name='reason'
+                 maxlength='100' placeholder='Brief reason for adjustment'>
+        </div>
+        <div class='col-sm-3'>
+          <button type='submit' class='btn btn-warning btn-sm w-100 fw-semibold'>Adjust</button>
+        </div>
+      </div>
+    </form>
+    <div class='subtle-box p-3'>
+      <div class='mini-label mb-2'>Recent Points Activity</div>
+      {history}
+    </div>
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminLiveOrders(string grain, string metricRange, int? locationId, DataTable? liveOrdersDt)
+        {
+            var rows = new StringBuilder();
+            if (liveOrdersDt == null || liveOrdersDt.Rows.Count == 0)
+            {
+                rows.Append("<tr><td colspan='5' class='text-muted'>No live orders found.</td></tr>");
+            }
+            else
+            {
+                foreach (DataRow row in liveOrdersDt.Rows)
+                {
+                    string orderLink = BuildAdminUrl(grain, locationId, null, RowInt(row, "CustomerID"), RowInt(row, "OrderID"), metricRange);
+                    rows.Append($@"
+<tr>
+  <td><a href='{orderLink}'>#{RowInt(row, "OrderID")}</a></td>
+  <td>{H(RowString(row, "Username"))}</td>
+  <td>{H(RowString(row, "StoreName"))}</td>
+  <td>{H(RowString(row, "ORD_Status"))}</td>
+  <td>{RowInt(row, "AgeMinutes")} min</td>
+</tr>");
+                }
+            }
+
+            return $@"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='section-title mb-3'>3. Live Order Queue</div>
+    <div class='table-responsive'>
+      <table class='table align-middle mb-0'>
+        <thead><tr><th>Order</th><th>Customer</th><th>Location</th><th>Status</th><th>Age</th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminSalesTrend(string grain, DataTable? salesTrendDt)
+        {
+            decimal maxSales = 0m;
+            if (salesTrendDt != null)
+                foreach (DataRow row in salesTrendDt.Rows)
+                    maxSales = Math.Max(maxSales, RowDecimal(row, "Sales"));
+
+            var rows = new StringBuilder();
+            if (salesTrendDt == null || salesTrendDt.Rows.Count == 0)
+            {
+                rows.Append("<div class='text-muted'>No completed order data available for this trend view.</div>");
+            }
+            else
+            {
+                foreach (DataRow row in salesTrendDt.Rows)
+                {
+                    decimal sales = RowDecimal(row, "Sales");
+                    decimal width = maxSales <= 0 ? 0 : Math.Round((sales / maxSales) * 100m, 1);
+                    rows.Append($@"
+<div class='mb-3'>
+  <div class='d-flex justify-content-between small mb-1'>
+    <span>{H(RowString(row, "BucketLabel"))}</span>
+    <span>${sales:F2} / {RowInt(row, "OrderCount")} orders</span>
+  </div>
+  <div class='trend-bar' style='width:{width.ToString(System.Globalization.CultureInfo.InvariantCulture)}%;'></div>
+</div>");
+                }
+            }
+
+            return $@"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='section-title mb-3'>4. Sales Trend</div>
+    <div class='small text-muted mb-3'>Current view: {H(grain.ToUpperInvariant())}</div>
+    {rows}
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminActivityFeed(DataTable? activityDt)
+        {
+            var items = new StringBuilder();
+            if (activityDt == null || activityDt.Rows.Count == 0)
+            {
+                items.Append("<div class='text-muted'>No recent activity found.</div>");
+            }
+            else
+            {
+                foreach (DataRow row in activityDt.Rows)
+                {
+                    items.Append($@"
+<div class='subtle-box p-3 mb-2'>
+  <div class='activity-entry'>
+    <div class='activity-time'>{H(RowDate(row, "ActivityAt")?.ToString("MMM d, h:mm tt") ?? "")}</div>
+    <span class='badge text-bg-light activity-type'>{H(RowString(row, "ActivityType"))}</span>
+    <div class='activity-title'>{H(RowString(row, "Title"))}</div>
+    <div class='activity-detail'>{H(RowString(row, "Detail"))}</div>
+  </div>
+</div>");
+                }
+            }
+
+            return $@"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3'>
+      <div class='section-title mb-0'>5. Recent Activity Feed</div>
+      <div class='small text-muted'>Newest activity first. Scroll for older entries.</div>
+    </div>
+    <div class='activity-scroll'>
+      {items}
+    </div>
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminPopularItems(DataTable? popularItemsDt)
+        {
+            var rows = new StringBuilder();
+            if (popularItemsDt == null || popularItemsDt.Rows.Count == 0)
+            {
+                rows.Append("<div class='text-muted'>No completed item sales found for this time window.</div>");
+            }
+            else
+            {
+                rows.Append("<div class='table-responsive'><table class='table table-sm mb-0'><thead><tr><th>Item</th><th>Units</th><th>Revenue</th></tr></thead><tbody>");
+                foreach (DataRow row in popularItemsDt.Rows)
+                {
+                    rows.Append($@"
+<tr>
+  <td>{H(RowString(row, "ITM_ItemName"))}<div class='small text-muted'>{H(RowString(row, "ITM_Category"))}</div></td>
+  <td>{RowInt(row, "UnitsSold")}</td>
+  <td>${RowDecimal(row, "Revenue"):F2}</td>
+</tr>");
+                }
+                rows.Append("</tbody></table></div>");
+            }
+
+            return $@"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='section-title mb-3'>6. Most Popular Items</div>
+    {rows}
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminPaymentMix(DataTable? paymentMixDt, DataTable? pointsMixDt)
+        {
+            var paymentRows = new StringBuilder();
+            if (paymentMixDt == null || paymentMixDt.Rows.Count == 0)
+            {
+                paymentRows.Append("<div class='text-muted'>No payment data available.</div>");
+            }
+            else
+            {
+                paymentRows.Append("<div class='table-responsive'><table class='table table-sm mb-3'><thead><tr><th>Type</th><th>Orders</th><th>Sales</th></tr></thead><tbody>");
+                foreach (DataRow row in paymentMixDt.Rows)
+                {
+                    paymentRows.Append($@"
+<tr>
+  <td>{H(RowString(row, "PaymentType"))}</td>
+  <td>{RowInt(row, "OrderCount")}</td>
+  <td>${RowDecimal(row, "Sales"):F2}</td>
+</tr>");
+                }
+                paymentRows.Append("</tbody></table></div>");
+            }
+
+            int earned = 0;
+            int redeemed = 0;
+            int refunded = 0;
+            if (pointsMixDt != null && pointsMixDt.Rows.Count > 0)
+            {
+                var row = pointsMixDt.Rows[0];
+                earned = RowInt(row, "PointsEarned");
+                redeemed = RowInt(row, "PointsRedeemed");
+                refunded = RowInt(row, "PointsRefunded");
+            }
+
+            return $@"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='section-title mb-3'>7. Payment and Loyalty Mix</div>
+    {paymentRows}
+    <div class='row g-2'>
+      <div class='col-4'><div class='subtle-box p-2'><div class='mini-label'>Earned</div><div class='fw-bold'>{earned:N0}</div></div></div>
+      <div class='col-4'><div class='subtle-box p-2'><div class='mini-label'>Redeemed</div><div class='fw-bold'>{redeemed:N0}</div></div></div>
+      <div class='col-4'><div class='subtle-box p-2'><div class='mini-label'>Refunded</div><div class='fw-bold'>{refunded:N0}</div></div></div>
+    </div>
+  </div>
+</div>";
+        }
+
+        private static string RenderAdminLocationPerformance(DataTable? locationPerfDt, bool isGlobal)
+        {
+            var rows = new StringBuilder();
+            if (locationPerfDt == null || locationPerfDt.Rows.Count == 0)
+            {
+                rows.Append("<tr><td colspan='6' class='text-muted'>No location performance data available.</td></tr>");
+            }
+            else
+            {
+                foreach (DataRow row in locationPerfDt.Rows)
+                {
+                    int completed = RowInt(row, "CompletedOrders");
+                    int cancelled = RowInt(row, "CancelledOrders");
+                    decimal cancelRate = completed + cancelled == 0 ? 0m : Math.Round((decimal)cancelled * 100m / (completed + cancelled), 1);
+
+                    rows.Append($@"
+<tr>
+  <td>{H(RowString(row, "StoreName"))}</td>
+  <td>{completed}</td>
+  <td>{RowInt(row, "PendingOrders")}</td>
+  <td>{cancelRate:F1}%</td>
+  <td>${RowDecimal(row, "Revenue"):F2}</td>
+  <td>${RowDecimal(row, "AvgTicket"):F2}</td>
+</tr>");
+                }
+            }
+
+            return $@"
+<div class='card admin-card'>
+  <div class='card-body'>
+    <div class='d-flex justify-content-between align-items-start gap-2 mb-3'>
+      <div>
+        <div class='section-title'>8. Store Performance by Location</div>
+        <div class='small text-muted'>Revenue and operational output over the last 7 days. {(isGlobal ? "Global comparison view." : "Scoped to this admin's store access.")}</div>
+      </div>
+      <span class='badge text-bg-light'>Avg pickup completion time needs a dedicated completion timestamp</span>
+    </div>
+    <div class='table-responsive'>
+      <table class='table align-middle mb-0'>
+        <thead><tr><th>Location</th><th>Completed</th><th>Pending</th><th>Cancel %</th><th>Revenue</th><th>Avg Ticket</th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
+  </div>
+</div>";
         }
 
         // ─── DATABASE HELPERS ─────────────────────────────────────────────────

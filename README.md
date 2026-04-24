@@ -102,9 +102,11 @@ Without this file the app will start but all database calls will fail.
 
 ## Database Schema
 
-See [`JabberJuicy_Master_Schema.txt`](JabberJuicy_Master_Schema.txt) for the full `CREATE TABLE` statements and seed data. Incremental changes to the live DB are tracked in [`db_changes.txt`](db_changes.txt).
+See [`Support_Material/JabberJuicy_Master_Schema.txt`](Support_Material/JabberJuicy_Master_Schema.txt) for the full `CREATE TABLE` statements and seed data. Incremental changes to the live DB are tracked in [`Support_Material/db_changes.txt`](Support_Material/db_changes.txt). Admin schema additions (5 new tables) are in [`admin_db_sql.txt`](admin_db_sql.txt) — run this after the core schema.
 
-**Tables:** `Customer`, `Item`, `Location`, `PaymentType`, `[Order]`, `OrderItem`, `JabberWonkTransaction`
+**Core tables:** `Customer`, `Item`, `Location`, `PaymentType`, `[Order]`, `OrderItem`, `JabberWonkTransaction`
+
+**Admin tables:** `AdminUser`, `AdminLocationAccess`, `SupportCase`, `SupportCaseNote`, `AdminAuditLog`
 
 All primary keys are `IDENTITY(1,1)` — do not specify ID values on `INSERT`.
 
@@ -130,6 +132,10 @@ Order status values: `Pending` → `Completed` (pickup confirmed) or `Cancelled`
 | `/pickup` | ✓ | Select pending order to confirm |
 | `/pickup/{id}` | ✓ | Confirm or cancel a specific order |
 | `/pickup/{id}/success` | ✓ | Pickup confirmed + drink quote |
+| `/admin/login` | Admin | Admin login (separate from customer auth) |
+| `/admin` | Admin | Admin dashboard — 8 operational + analytics widgets |
+| `/admin/points-adjust` | Admin | POST — manual points adjustment with audit log |
+| `/admin/logout` | Admin | Clear admin session |
 
 ---
 

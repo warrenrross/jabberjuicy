@@ -1,0 +1,217 @@
+/* ============================================================
+   admin_db_sql.txt
+   JabberJuicy Admin Schema Additions
+
+   Run this AFTER the core JabberJuicy schema has already been created.
+   This file adds the long-term separate admin solution.
+
+   Access model:
+   - Global admin: ADM_IsGlobalAccess = 1 and no location rows required
+   - Local admin:  ADM_IsGlobalAccess = 0 and one or more
+                   AdminLocationAccess rows are required
+   ============================================================ */
+
+
+-- ─── ADMIN USER ──────────────────────────────────────────────
+
+IF OBJECT_ID('dbo.AdminUser', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.AdminUser (
+        AdminUserID         INT          IDENTITY(1,1) PRIMARY KEY,
+        ADM_Username        VARCHAR(30)  NOT NULL UNIQUE,
+        ADM_PasswordHash    VARCHAR(255) NOT NULL,
+        ADM_DisplayName     VARCHAR(60)  NOT NULL,
+        ADM_Role            VARCHAR(20)  NOT NULL,
+        ADM_IsActive        BIT          NOT NULL CONSTRAINT DF_AdminUser_IsActive DEFAULT 1,
+        ADM_IsGlobalAccess  BIT          NOT NULL CONSTRAINT DF_AdminUser_IsGlobalAccess DEFAULT 0,
+        ADM_IsDemoUser      BIT          NOT NULL CONSTRAINT DF_AdminUser_IsDemoUser DEFAULT 0,
+        ADM_CreatedAt       DATETIME     NOT NULL CONSTRAINT DF_AdminUser_CreatedAt DEFAULT GETDATE(),
+        ADM_LastLoginAt     DATETIME     NULL,
+        CONSTRAINT CK_AdminUser_Role
+            CHECK (ADM_Role IN ('Admin', 'Manager', 'Support'))
+    );
+END;
+
+
+-- ─── ADMIN LOCATION ACCESS ──────────────────────────────────
+-- Local admins should have one or more rows here.
+-- Global admins should have ADM_IsGlobalAccess = 1 instead.
+
+IF OBJECT_ID('dbo.AdminLocationAccess', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.AdminLocationAccess (
+        AdminLocationAccessID INT IDENTITY(1,1) PRIMARY KEY,
+        AdminUserID           INT NOT NULL,
+        LocationID            INT NOT NULL,
+        ALA_CreatedAt         DATETIME NOT NULL CONSTRAINT DF_AdminLocationAccess_CreatedAt DEFAULT GETDATE(),
+        CONSTRAINT FK_AdminLocationAccess_AdminUser
+            FOREIGN KEY (AdminUserID) REFERENCES dbo.AdminUser(AdminUserID),
+        CONSTRAINT FK_AdminLocationAccess_Location
+            FOREIGN KEY (LocationID) REFERENCES dbo.Location(LocationID),
+        CONSTRAINT UQ_AdminLocationAccess_AdminUser_Location
+            UNIQUE (AdminUserID, LocationID)
+    );
+END;
+
+
+-- ─── SUPPORT CASE ───────────────────────────────────────────
+
+IF OBJECT_ID('dbo.SupportCase', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.SupportCase (
+        SupportCaseID         INT           IDENTITY(1,1) PRIMARY KEY,
+        CustomerID            INT           NULL,
+        OrderID               INT           NULL,
+        LocationID            INT           NULL,
+        CreatedByAdminUserID  INT           NOT NULL,
+        AssignedToAdminUserID INT           NULL,
+        SC_Status             VARCHAR(20)   NOT NULL CONSTRAINT DF_SupportCase_Status DEFAULT 'Open',
+        SC_Priority           VARCHAR(10)   NOT NULL CONSTRAINT DF_SupportCase_Priority DEFAULT 'Medium',
+        SC_Category           VARCHAR(20)   NOT NULL,
+        SC_Subject            VARCHAR(120)  NOT NULL,
+        SC_Description        VARCHAR(1000) NULL,
+        SC_CreatedAt          DATETIME      NOT NULL CONSTRAINT DF_SupportCase_CreatedAt DEFAULT GETDATE(),
+        SC_ResolvedAt         DATETIME      NULL,
+        CONSTRAINT FK_SupportCase_Customer
+            FOREIGN KEY (CustomerID) REFERENCES dbo.Customer(CustomerID),
+        CONSTRAINT FK_SupportCase_Order
+            FOREIGN KEY (OrderID) REFERENCES dbo.[Order](OrderID),
+        CONSTRAINT FK_SupportCase_Location
+            FOREIGN KEY (LocationID) REFERENCES dbo.Location(LocationID),
+        CONSTRAINT FK_SupportCase_CreatedByAdmin
+            FOREIGN KEY (CreatedByAdminUserID) REFERENCES dbo.AdminUser(AdminUserID),
+        CONSTRAINT FK_SupportCase_AssignedAdmin
+            FOREIGN KEY (AssignedToAdminUserID) REFERENCES dbo.AdminUser(AdminUserID),
+        CONSTRAINT CK_SupportCase_Status
+            CHECK (SC_Status IN ('Open', 'In Review', 'Resolved', 'Closed')),
+        CONSTRAINT CK_SupportCase_Priority
+            CHECK (SC_Priority IN ('Low', 'Medium', 'High')),
+        CONSTRAINT CK_SupportCase_Category
+            CHECK (SC_Category IN ('Refund', 'Pickup', 'Account', 'Points', 'Order', 'Other'))
+    );
+END;
+
+
+-- ─── SUPPORT CASE NOTE ──────────────────────────────────────
+
+IF OBJECT_ID('dbo.SupportCaseNote', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.SupportCaseNote (
+        SupportCaseNoteID INT           IDENTITY(1,1) PRIMARY KEY,
+        SupportCaseID     INT           NOT NULL,
+        AdminUserID       INT           NOT NULL,
+        SCN_NoteText      VARCHAR(1000) NOT NULL,
+        SCN_CreatedAt     DATETIME      NOT NULL CONSTRAINT DF_SupportCaseNote_CreatedAt DEFAULT GETDATE(),
+        CONSTRAINT FK_SupportCaseNote_SupportCase
+            FOREIGN KEY (SupportCaseID) REFERENCES dbo.SupportCase(SupportCaseID),
+        CONSTRAINT FK_SupportCaseNote_AdminUser
+            FOREIGN KEY (AdminUserID) REFERENCES dbo.AdminUser(AdminUserID)
+    );
+END;
+
+
+-- ─── ADMIN AUDIT LOG ────────────────────────────────────────
+
+IF OBJECT_ID('dbo.AdminAuditLog', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.AdminAuditLog (
+        AdminAuditLogID INT           IDENTITY(1,1) PRIMARY KEY,
+        AdminUserID     INT           NOT NULL,
+        CustomerID      INT           NULL,
+        OrderID         INT           NULL,
+        LocationID      INT           NULL,
+        AAL_ActionType  VARCHAR(40)   NOT NULL,
+        AAL_EntityType  VARCHAR(40)   NOT NULL,
+        AAL_EntityID    INT           NULL,
+        AAL_Details     VARCHAR(1000) NULL,
+        AAL_CreatedAt   DATETIME      NOT NULL CONSTRAINT DF_AdminAuditLog_CreatedAt DEFAULT GETDATE(),
+        CONSTRAINT FK_AdminAuditLog_AdminUser
+            FOREIGN KEY (AdminUserID) REFERENCES dbo.AdminUser(AdminUserID),
+        CONSTRAINT FK_AdminAuditLog_Customer
+            FOREIGN KEY (CustomerID) REFERENCES dbo.Customer(CustomerID),
+        CONSTRAINT FK_AdminAuditLog_Order
+            FOREIGN KEY (OrderID) REFERENCES dbo.[Order](OrderID),
+        CONSTRAINT FK_AdminAuditLog_Location
+            FOREIGN KEY (LocationID) REFERENCES dbo.Location(LocationID)
+    );
+END;
+
+
+-- ─── INDEXES ────────────────────────────────────────────────
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_AdminLocationAccess_AdminUser_Location'
+      AND object_id = OBJECT_ID('dbo.AdminLocationAccess')
+)
+BEGIN
+    CREATE INDEX IX_AdminLocationAccess_AdminUser_Location
+        ON dbo.AdminLocationAccess (AdminUserID, LocationID);
+END;
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_SupportCase_Customer_Status_CreatedAt'
+      AND object_id = OBJECT_ID('dbo.SupportCase')
+)
+BEGIN
+    CREATE INDEX IX_SupportCase_Customer_Status_CreatedAt
+        ON dbo.SupportCase (CustomerID, SC_Status, SC_CreatedAt DESC);
+END;
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_SupportCase_Order_Status'
+      AND object_id = OBJECT_ID('dbo.SupportCase')
+)
+BEGIN
+    CREATE INDEX IX_SupportCase_Order_Status
+        ON dbo.SupportCase (OrderID, SC_Status);
+END;
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_SupportCase_Assigned_Status_CreatedAt'
+      AND object_id = OBJECT_ID('dbo.SupportCase')
+)
+BEGIN
+    CREATE INDEX IX_SupportCase_Assigned_Status_CreatedAt
+        ON dbo.SupportCase (AssignedToAdminUserID, SC_Status, SC_CreatedAt DESC);
+END;
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_SupportCaseNote_SupportCase_CreatedAt'
+      AND object_id = OBJECT_ID('dbo.SupportCaseNote')
+)
+BEGIN
+    CREATE INDEX IX_SupportCaseNote_SupportCase_CreatedAt
+        ON dbo.SupportCaseNote (SupportCaseID, SCN_CreatedAt DESC);
+END;
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_AdminAuditLog_AdminUser_CreatedAt'
+      AND object_id = OBJECT_ID('dbo.AdminAuditLog')
+)
+BEGIN
+    CREATE INDEX IX_AdminAuditLog_AdminUser_CreatedAt
+        ON dbo.AdminAuditLog (AdminUserID, AAL_CreatedAt DESC);
+END;
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = 'IX_AdminAuditLog_Order_CreatedAt'
+      AND object_id = OBJECT_ID('dbo.AdminAuditLog')
+)
+BEGIN
+    CREATE INDEX IX_AdminAuditLog_Order_CreatedAt
+        ON dbo.AdminAuditLog (OrderID, AAL_CreatedAt DESC);
+END;

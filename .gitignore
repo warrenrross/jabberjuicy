@@ -3,6 +3,7 @@ appsettings.Development.json
 appsettings.*.json
 !appsettings.json
 railway_connection_string.txt
+insert_sql.txt
 
 # ─── Local notes (not for public repo) ──────────────────────
 PROGRESS.md
