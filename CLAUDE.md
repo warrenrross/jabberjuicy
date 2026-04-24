@@ -76,6 +76,10 @@ The conceptual model (`Concept_drawing.drawio`, `Conceptual Design.drawio.png`) 
 
 Single-file ASP.NET Core Minimal API. All routes and handlers live in `Program.cs`. Business logic helpers (auth, cart, points, DB) are static private methods in the same `Program` class. `DrinkQuotes.cs` is the only other code file — a static dictionary mapping drink names to quotes.
 
+Single-file ASP.NET Core Minimal API. All routes, handlers, helpers, and the background service live in `Program.cs`. `DrinkQuotes.cs` is the only other code file.
+
+**Background service:** `ExpiredOrderCleanupService` is a `private sealed class` nested inside `Program`, registered as an `IHostedService`. It runs on a 2-hour timer and auto-cancels stale pending orders.
+
 **Key helper methods (all in `Program.cs`):**
 
 | Helper | Purpose |
@@ -85,6 +89,7 @@ Single-file ASP.NET Core Minimal API. All routes and handlers live in `Program.c
 | `GetJabberWonkPaymentTypeIdAsync` | Look up JWP payment type ID dynamically (never hardcoded) |
 | `GetPendingOrderCountAsync` | Count pending orders for navbar badge |
 | `HashPassword` / `VerifyPassword` | PBKDF2-SHA256, 310k iterations |
+| `CancelOrderWithRefundAsync` | Shared cancel+JWP refund logic; uses `OUTPUT DELETED` to prevent double-refund |
 | `FillDataTableViaCommandAsync` | Parameterized SELECT → DataTable |
 | `ExecSqlCommandAsync` | Parameterized INSERT/UPDATE/DELETE |
 
@@ -97,10 +102,13 @@ Single-file ASP.NET Core Minimal API. All routes and handlers live in `Program.c
 | Redemption rate | 100 pts = $1.00 |
 | Earn on points-redeemed orders | 0 (no double-dip) |
 | Cancellation refund | Full points refunded if order was paid with JWP |
+| Per-visit earn cap | Max 2,500 pts earned per order (any excess is dropped) |
 
-Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_PointsPerDollar`, `JWP_PointsPerRedempt`.
+Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_PointsPerDollar`, `JWP_PointsPerRedempt`, `JWP_MaxEarnPerVisit`.
 
 **`JWT_TransactionType` values:** `EARN` (cash/card order completed), `REDEEM` (JWP order placed), `REFUND` (JWP order cancelled). The cancel handler looks up the original `REDEEM` row to get the exact points to restore.
+
+**Earn cap math:** `earned = Min(JWP_PointsPerVisit + floor(total) * JWP_PointsPerDollar, JWP_MaxEarnPerVisit)`. Cap triggers on orders ≥ $245.
 
 ## Known Issues
 
@@ -112,6 +120,14 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 
 4. **Custom domain HTTPS** — `jabberjuicy.com` DNS resolves but Railway has not auto-provisioned the HTTPS cert for the apex domain. `www.jabberjuicy.com` may have the same issue. Check Railway → Settings → Networking after next deploy.
 
+## Session Notes (Apr 24, 2026)
+
+- **Added:** Auto-cancel background service (`ExpiredOrderCleanupService`, nested `BackgroundService` inside `Program`). Polls every 2 hours (12x/day), cancels any `Pending` order older than 60 minutes, refunds JWP if applicable. Registered via `builder.Services.AddHostedService<ExpiredOrderCleanupService>()`.
+- **Refactored:** Extracted `CancelOrderWithRefundAsync(orderId, custId, logger, notes)` shared method. Uses `OUTPUT DELETED ... WHERE ORD_Status = 'Pending'` to atomically cancel and guard against double-refund race conditions. Both `HandlePickupCancel` and the background service call it.
+- **Added:** `ORDER_EXPIRY_MINUTES = 60` and `ORDER_CLEANUP_INTERVAL = TimeSpan.FromHours(2)` constants at top of `Program.cs`.
+- **Added:** `JWP_MaxEarnPerVisit = 2500` cap — points earned per order cannot exceed 2,500 regardless of order size. Applied via `Math.Min` in the checkout earn calculation.
+- Changes not yet committed — commit and push when ready to deploy.
+
 ## Session Notes (Apr 23, 2026)
 
 - **Fixed:** `GET /pickup/{orderId}/success` route was missing from route registration — handler existed but was unreachable, causing a broken link after confirming pickup. Added `app.MapGet("/pickup/{orderId:int}/success", HandlePickupSuccess)`.
@@ -120,9 +136,10 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 
 ## What's Next (Phase 3 Remaining)
 
+- [ ] **Commit & push Apr 24 changes** — `Program.cs` has uncommitted changes (background service + earn cap)
 - [ ] SQL Queries deliverable (Grayson & Andrew) — analytical queries against the live DB
-- [ ] User's Manual (Grayson) — document the app for end users
-- [ ] Update `Echo_Data_Dictionary.xlsx` with new schema changes (add `REFUND` transaction type, `CUS_PointsBalance`, `JabberWonkTransaction` table)
+- [ ] User's Manual (Grayson) — `_Deliverables/Instruction_Manual.docx` drafted; needs review
+- [ ] Update `Echo_Data_Dictionary.xlsx` with new schema changes (add `REFUND` transaction type, `CUS_PointsBalance`, `JabberWonkTransaction` table, JWP earn cap rule)
 - [ ] Fix duplicate location rows in DB (see Known Issue #1)
 - [ ] Test full end-to-end flow on live Railway deployment after Phase 3 push
 - [ ] Prepare presentation (all members, Apr 28–30)

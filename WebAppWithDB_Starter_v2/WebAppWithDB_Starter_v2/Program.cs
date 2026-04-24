@@ -18,6 +18,11 @@ namespace WebAppWithDB_Starter_v2
         private const int JWP_PointsPerVisit   = 50;   // flat bonus per qualifying order
         private const int JWP_PointsPerDollar  = 10;   // pts per whole dollar spent
         private const int JWP_PointsPerRedempt = 100;  // pts required to redeem $1.00
+        private const int JWP_MaxEarnPerVisit  = 2500; // per-order earn cap
+
+        // ─── Order expiry ──────────────────────────────────────────────────────
+        private const int ORDER_EXPIRY_MINUTES = 60;                              // cancel Pending orders older than 1 hour
+        private static readonly TimeSpan ORDER_CLEANUP_INTERVAL = TimeSpan.FromHours(2); // poll 12x per day
 
         // ─────────────────────────────────────────────────────────────────────
         public static void Main(string[] args)
@@ -31,6 +36,7 @@ namespace WebAppWithDB_Starter_v2
                 o.Cookie.HttpOnly = true;
                 o.Cookie.IsEssential = true;
             });
+            builder.Services.AddHostedService<ExpiredOrderCleanupService>();
 
             var app = builder.Build();
             _config = app.Configuration;
@@ -1063,7 +1069,9 @@ namespace WebAppWithDB_Starter_v2
             }
             else
             {
-                int earned  = JWP_PointsPerVisit + ((int)Math.Floor(total) * JWP_PointsPerDollar);
+                int earned  = Math.Min(
+                    JWP_PointsPerVisit + ((int)Math.Floor(total) * JWP_PointsPerDollar),
+                    JWP_MaxEarnPerVisit);
                 pointsDelta = earned;
                 newBalance  = currentBal + earned;
             }
@@ -1668,7 +1676,7 @@ namespace WebAppWithDB_Starter_v2
             int custId = GetCurrentUserId(ctx);
 
             var checkCmd = new SqlCommand(
-                "SELECT ORD_Status, PaymentTypeID FROM [Order] WHERE OrderID = @oid AND CustomerID = @cid");
+                "SELECT ORD_Status FROM [Order] WHERE OrderID = @oid AND CustomerID = @cid");
             checkCmd.Parameters.AddWithValue("@oid", orderId);
             checkCmd.Parameters.AddWithValue("@cid", custId);
             var checkDt = await FillDataTableViaCommandAsync(checkCmd, logger);
@@ -1677,51 +1685,64 @@ namespace WebAppWithDB_Starter_v2
                     .Equals("Pending", StringComparison.OrdinalIgnoreCase))
                 return Results.Redirect("/history");
 
-            int orderPayTypeId = Convert.ToInt32(checkDt.Rows[0]["PaymentTypeID"]);
-
-            var updateCmd = new SqlCommand(
-                "UPDATE [Order] SET ORD_Status = 'Cancelled' WHERE OrderID = @oid AND CustomerID = @cid");
-            updateCmd.Parameters.AddWithValue("@oid", orderId);
-            updateCmd.Parameters.AddWithValue("@cid", custId);
-            await ExecSqlCommandAsync(updateCmd, logger);
-
-            // Refund points if the order was paid with JabberWonk Points
-            int jwpPayId = await GetJabberWonkPaymentTypeIdAsync(logger);
-            if (jwpPayId > 0 && orderPayTypeId == jwpPayId)
-            {
-                var txLookupCmd = new SqlCommand(
-                    "SELECT TOP 1 JWT_PointsDelta FROM JabberWonkTransaction " +
-                    "WHERE OrderID = @oid AND CustomerID = @cid AND JWT_TransactionType = 'REDEEM'");
-                txLookupCmd.Parameters.AddWithValue("@oid", orderId);
-                txLookupCmd.Parameters.AddWithValue("@cid", custId);
-                var txDt = await FillDataTableViaCommandAsync(txLookupCmd, logger);
-
-                if (txDt != null && txDt.Rows.Count > 0)
-                {
-                    int pointsToRefund = Math.Abs(Convert.ToInt32(txDt.Rows[0]["JWT_PointsDelta"]));
-                    int currentBal     = await GetPointsBalanceAsync(custId, logger);
-                    int newBalance     = currentBal + pointsToRefund;
-
-                    var balCmd = new SqlCommand(
-                        "UPDATE Customer SET CUS_PointsBalance = @bal WHERE CustomerID = @cid");
-                    balCmd.Parameters.AddWithValue("@bal", newBalance);
-                    balCmd.Parameters.AddWithValue("@cid", custId);
-                    await ExecSqlCommandAsync(balCmd, logger);
-
-                    var refundTxCmd = new SqlCommand(@"
-                        INSERT INTO JabberWonkTransaction
-                            (JWT_PointsDelta, JWT_TransactionType, JWT_BalanceAfter, JWT_Notes, CustomerID, OrderID)
-                        VALUES (@delta, 'REFUND', @after, @notes, @cid, @oid)");
-                    refundTxCmd.Parameters.AddWithValue("@delta", pointsToRefund);
-                    refundTxCmd.Parameters.AddWithValue("@after", newBalance);
-                    refundTxCmd.Parameters.AddWithValue("@notes", $"REFUND on cancelled Order #{orderId}");
-                    refundTxCmd.Parameters.AddWithValue("@cid",   custId);
-                    refundTxCmd.Parameters.AddWithValue("@oid",   orderId);
-                    await ExecSqlCommandAsync(refundTxCmd, logger);
-                }
-            }
-
+            await CancelOrderWithRefundAsync(orderId, custId, logger,
+                $"REFUND on cancelled Order #{orderId}");
             return Results.Redirect("/history");
+        }
+
+        // Shared cancel+refund logic used by both the HTTP handler and the expiry background service.
+        // Uses OUTPUT DELETED so only the caller that actually flips the row to Cancelled issues the refund,
+        // preventing double-refunds if a user cancel and the background service race.
+        private static async Task CancelOrderWithRefundAsync(
+            int orderId, int custId, ILogger? logger = null, string? refundNotes = null)
+        {
+            var cancelCmd = new SqlCommand(@"
+                UPDATE [Order]
+                SET    ORD_Status = 'Cancelled'
+                OUTPUT DELETED.OrderID, DELETED.PaymentTypeID
+                WHERE  OrderID    = @oid
+                  AND  CustomerID = @cid
+                  AND  ORD_Status = 'Pending'");
+            cancelCmd.Parameters.AddWithValue("@oid", orderId);
+            cancelCmd.Parameters.AddWithValue("@cid", custId);
+            var cancelledDt = await FillDataTableViaCommandAsync(cancelCmd, logger);
+
+            // 0 rows means the order was already cancelled/completed — nothing to refund
+            if (cancelledDt == null || cancelledDt.Rows.Count == 0) return;
+
+            int orderPayTypeId = Convert.ToInt32(cancelledDt.Rows[0]["PaymentTypeID"]);
+
+            int jwpPayId = await GetJabberWonkPaymentTypeIdAsync(logger);
+            if (jwpPayId <= 0 || orderPayTypeId != jwpPayId) return;
+
+            var txLookupCmd = new SqlCommand(
+                "SELECT TOP 1 JWT_PointsDelta FROM JabberWonkTransaction " +
+                "WHERE OrderID = @oid AND CustomerID = @cid AND JWT_TransactionType = 'REDEEM'");
+            txLookupCmd.Parameters.AddWithValue("@oid", orderId);
+            txLookupCmd.Parameters.AddWithValue("@cid", custId);
+            var txDt = await FillDataTableViaCommandAsync(txLookupCmd, logger);
+            if (txDt == null || txDt.Rows.Count == 0) return;
+
+            int pointsToRefund = Math.Abs(Convert.ToInt32(txDt.Rows[0]["JWT_PointsDelta"]));
+            int currentBal     = await GetPointsBalanceAsync(custId, logger);
+            int newBalance     = currentBal + pointsToRefund;
+
+            var balCmd = new SqlCommand(
+                "UPDATE Customer SET CUS_PointsBalance = @bal WHERE CustomerID = @cid");
+            balCmd.Parameters.AddWithValue("@bal", newBalance);
+            balCmd.Parameters.AddWithValue("@cid", custId);
+            await ExecSqlCommandAsync(balCmd, logger);
+
+            var refundTxCmd = new SqlCommand(@"
+                INSERT INTO JabberWonkTransaction
+                    (JWT_PointsDelta, JWT_TransactionType, JWT_BalanceAfter, JWT_Notes, CustomerID, OrderID)
+                VALUES (@delta, 'REFUND', @after, @notes, @cid, @oid)");
+            refundTxCmd.Parameters.AddWithValue("@delta", pointsToRefund);
+            refundTxCmd.Parameters.AddWithValue("@after", newBalance);
+            refundTxCmd.Parameters.AddWithValue("@notes", refundNotes ?? $"REFUND on cancelled Order #{orderId}");
+            refundTxCmd.Parameters.AddWithValue("@cid",   custId);
+            refundTxCmd.Parameters.AddWithValue("@oid",   orderId);
+            await ExecSqlCommandAsync(refundTxCmd, logger);
         }
 
         // GET /pickup/{orderId}/success  — Pickup confirmed success page with drink quote
@@ -1876,6 +1897,69 @@ namespace WebAppWithDB_Starter_v2
                 }
             }
             return false;
+        }
+
+        // ── Background service: auto-cancel Pending orders older than ORDER_EXPIRY_MINUTES ──
+        private sealed class ExpiredOrderCleanupService : BackgroundService
+        {
+            private readonly ILogger<ExpiredOrderCleanupService> _logger;
+
+            public ExpiredOrderCleanupService(ILogger<ExpiredOrderCleanupService> logger)
+                => _logger = logger;
+
+            protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+            {
+                _logger.LogInformation(
+                    "Order expiry service started — checking every {Hours}h, expiry threshold {Min}min.",
+                    ORDER_CLEANUP_INTERVAL.TotalHours, ORDER_EXPIRY_MINUTES);
+
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    try   { await RunCleanupAsync(stoppingToken); }
+                    catch (OperationCanceledException) { break; }
+                    catch (Exception ex)
+                    {
+                        // Log but never rethrow — an unhandled exception here kills the whole process
+                        _logger.LogError(ex, "Unexpected error in order expiry cleanup.");
+                    }
+
+                    await Task.Delay(ORDER_CLEANUP_INTERVAL, stoppingToken);
+                }
+
+                _logger.LogInformation("Order expiry service stopped.");
+            }
+
+            private async Task RunCleanupAsync(CancellationToken ct)
+            {
+                var cmd = new SqlCommand(@"
+                    SELECT OrderID, CustomerID FROM [Order]
+                    WHERE  ORD_Status   = 'Pending'
+                      AND  ORD_OrderDate < DATEADD(MINUTE, -@exp, GETDATE())");
+                cmd.Parameters.AddWithValue("@exp", ORDER_EXPIRY_MINUTES);
+
+                var dt = await FillDataTableViaCommandAsync(cmd, _logger);
+                if (dt == null || dt.Rows.Count == 0) return;
+
+                _logger.LogInformation("Expiry sweep: found {Count} expired pending order(s).", dt.Rows.Count);
+
+                foreach (DataRow row in dt.Rows)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    int oid = Convert.ToInt32(row["OrderID"]);
+                    int cid = Convert.ToInt32(row["CustomerID"]);
+                    try
+                    {
+                        await CancelOrderWithRefundAsync(oid, cid, _logger,
+                            $"AUTO-CANCELLED Order #{oid} — expired after {ORDER_EXPIRY_MINUTES} min");
+                        _logger.LogInformation("Auto-cancelled expired Order #{OrderId}.", oid);
+                    }
+                    catch (Exception ex)
+                    {
+                        // One failing order must not block the rest
+                        _logger.LogError(ex, "Failed to auto-cancel Order #{OrderId}.", oid);
+                    }
+                }
+            }
         }
     }
 }
