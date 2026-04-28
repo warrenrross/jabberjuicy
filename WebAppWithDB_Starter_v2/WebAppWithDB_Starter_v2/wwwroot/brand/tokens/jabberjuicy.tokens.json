@@ -1,0 +1,30 @@
+{
+  "brand": "JabberJuicy",
+  "colors": {
+    "forest": "#2E5A3D",
+    "plum": "#6E2C91",
+    "citrus": "#F28C1B",
+    "cream": "#F4EAD4",
+    "berry": "#D94E8F",
+    "teal": "#09A7A7",
+    "copper": "#8B5036",
+    "charcoal": "#1E1E1E"
+  },
+  "typography": {
+    "display": {
+      "family": "Cinzel Decorative",
+      "weight": 700
+    },
+    "body": {
+      "family": "Lato",
+      "weights": [400, 500]
+    }
+  },
+  "assets": {
+    "primaryLogo": "../logos/logo-primary-transparent.png",
+    "horizontalLogo": "../logos/logo-horizontal-transparent.png",
+    "stackedLogo": "../logos/logo-stacked-transparent.png",
+    "monogram": "../icons/icon-monogram-green.png",
+    "appIcon": "../icons/icon-app-purple.png"
+  }
+}

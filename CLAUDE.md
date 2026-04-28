@@ -130,7 +130,7 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 
 ## Known Issues
 
-1. **Duplicate locations in DB** — A re-run of the location seed script created duplicate rows (LocationIDs 5–12 mirror 1–4). Real orders exist on the duplicate IDs so a simple DELETE is blocked by FK constraint. Workaround in app: `MIN(LocationID)` GROUP BY in the checkout location query. **Fix before final deployment:** UPDATE Orders on duplicate IDs to point to original IDs, then DELETE duplicates.
+1. **Duplicate locations in DB** — ✅ Resolved Apr 27. Duplicate rows (LocationIDs 5–12) manually removed directly in the DB. The `MIN(LocationID)` workaround in the checkout query can be cleaned up but is now a no-op.
 
 2. **Data dictionary mismatch** — `Echo_Data_Dictionary.xlsx` still documents PKs as CHAR types (original design) and does not yet include `CUS_PointsBalance`, `JabberWonkTransaction`, or the JabberWonk Points PaymentType row. Needs manual update in Excel before final submission.
 
@@ -165,10 +165,10 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 ## What's Next (Phase 3 Remaining)
 
 - [ ] **Commit & push all Apr 24 changes** — `Program.cs` has uncommitted changes (background service, earn cap, admin module, code-review fixes). All moved/new support files also need staging.
-- [ ] **Apply admin DB schema to live DB** — Run `admin_db_sql.txt` in SSMS, then run your local `insert_sql.txt` to seed the demo admin user (`JabberWocky` / `Bandersnatch!`).
+- [x] **Apply admin DB schema to live DB** — `admin_db_sql.txt` applied and tested as of Apr 24. All 5 admin tables live and verified.
 - [ ] SQL Queries deliverable (Grayson & Andrew) — analytical queries against the live DB
 - [ ] User's Manual (Grayson) — `_Deliverables/Instruction_Manual.docx` drafted; needs review
 - [ ] Update `Echo_Data_Dictionary.xlsx` with new schema changes (add `REFUND` transaction type, `CUS_PointsBalance`, `JabberWonkTransaction` table, JWP earn cap rule, 5 new admin tables)
-- [ ] Fix duplicate location rows in DB — script at `Support_Material/remove_locations_gt11.sql` (see Known Issue #1)
+- [x] Fix duplicate location rows in DB — manually resolved in DB (Apr 27)
 - [ ] Test full end-to-end flow on live Railway deployment after Phase 3 push — include admin login at `/admin/login`
 - [ ] Prepare presentation (all members, Apr 28–30)

@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JabberJuicy Web Assets Preview</title>
+  <link rel="stylesheet" href="./tokens/jabberjuicy.tokens.css" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(242, 140, 27, 0.16), transparent 28%),
+        linear-gradient(180deg, #fbf4e8 0%, #f4ead4 100%);
+    }
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+    h1, h2 {
+      font-family: var(--jj-font-display);
+      color: var(--jj-forest);
+      margin: 0 0 16px;
+    }
+    p {
+      margin: 0 0 20px;
+      line-height: 1.5;
+    }
+    .hero {
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid rgba(46, 90, 61, 0.12);
+      border-radius: 28px;
+      box-shadow: var(--jj-shadow-soft);
+      padding: 28px;
+      margin-bottom: 32px;
+    }
+    .hero img {
+      max-width: min(100%, 480px);
+      height: auto;
+      display: block;
+      margin-bottom: 18px;
+    }
+    .section {
+      margin-top: 28px;
+      padding: 24px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(46, 90, 61, 0.1);
+      border-radius: 24px;
+      box-shadow: var(--jj-shadow-soft);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background:
+        linear-gradient(45deg, rgba(0, 0, 0, 0.025) 25%, transparent 25%, transparent 75%, rgba(0, 0, 0, 0.025) 75%),
+        linear-gradient(45deg, rgba(0, 0, 0, 0.025) 25%, transparent 25%, transparent 75%, rgba(0, 0, 0, 0.025) 75%);
+      background-position: 0 0, 12px 12px;
+      background-size: 24px 24px;
+      border: 1px solid rgba(46, 90, 61, 0.1);
+      border-radius: 18px;
+      padding: 16px;
+      min-height: 170px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .card img {
+      max-width: 100%;
+      max-height: 120px;
+      width: auto;
+      height: auto;
+      margin: 0 auto 12px;
+      display: block;
+    }
+    .name {
+      font-size: 13px;
+      color: rgba(30, 30, 30, 0.8);
+      word-break: break-word;
+    }
+    .palette {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 14px;
+    }
+    .swatch {
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(46, 90, 61, 0.12);
+      background: #fff;
+    }
+    .swatch-color {
+      height: 74px;
+    }
+    .swatch-label {
+      padding: 12px;
+      font-size: 13px;
+    }
+    .logo-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 18px;
+    }
+    .logo-row .card {
+      min-height: 220px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <img src="./logos/logo-primary-transparent.png" alt="JabberJuicy primary logo" />
+      <p>Extracted web asset package from the JabberJuicy branding sheet. All image exports here are PNGs with transparent backgrounds where practical, ready for direct use in a website or mockup.</p>
+    </section>
+
+    <section class="section">
+      <h2>Logos</h2>
+      <div class="logo-row">
+        <div class="card"><img src="./logos/logo-primary-transparent.png" alt="" /><div class="name">logo-primary-transparent.png</div></div>
+        <div class="card"><img src="./logos/logo-horizontal-transparent.png" alt="" /><div class="name">logo-horizontal-transparent.png</div></div>
+        <div class="card"><img src="./logos/logo-stacked-transparent.png" alt="" /><div class="name">logo-stacked-transparent.png</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Icons</h2>
+      <div class="grid">
+        <div class="card"><img src="./icons/icon-round-color.png" alt="" /><div class="name">icon-round-color.png</div></div>
+        <div class="card"><img src="./icons/icon-dragon-line.png" alt="" /><div class="name">icon-dragon-line.png</div></div>
+        <div class="card"><img src="./icons/icon-monogram-green.png" alt="" /><div class="name">icon-monogram-green.png</div></div>
+        <div class="card"><img src="./icons/icon-app-color.png" alt="" /><div class="name">icon-app-color.png</div></div>
+        <div class="card"><img src="./icons/icon-app-dark.png" alt="" /><div class="name">icon-app-dark.png</div></div>
+        <div class="card"><img src="./icons/icon-app-cream.png" alt="" /><div class="name">icon-app-cream.png</div></div>
+        <div class="card"><img src="./icons/icon-app-purple.png" alt="" /><div class="name">icon-app-purple.png</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Line Icons</h2>
+      <div class="grid">
+        <div class="card"><img src="./icons/icon-chat.png" alt="" /><div class="name">icon-chat.png</div></div>
+        <div class="card"><img src="./icons/icon-people.png" alt="" /><div class="name">icon-people.png</div></div>
+        <div class="card"><img src="./icons/icon-bell.png" alt="" /><div class="name">icon-bell.png</div></div>
+        <div class="card"><img src="./icons/icon-leaf.png" alt="" /><div class="name">icon-leaf.png</div></div>
+        <div class="card"><img src="./icons/icon-heart.png" alt="" /><div class="name">icon-heart.png</div></div>
+        <div class="card"><img src="./icons/icon-gear.png" alt="" /><div class="name">icon-gear.png</div></div>
+        <div class="card"><img src="./icons/icon-shield.png" alt="" /><div class="name">icon-shield.png</div></div>
+        <div class="card"><img src="./icons/icon-bowl.png" alt="" /><div class="name">icon-bowl.png</div></div>
+        <div class="card"><img src="./icons/icon-cup.png" alt="" /><div class="name">icon-cup.png</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Illustrations</h2>
+      <div class="grid">
+        <div class="card"><img src="./illustrations/mascot-dragon.png" alt="" /><div class="name">mascot-dragon.png</div></div>
+        <div class="card"><img src="./illustrations/teapot.png" alt="" /><div class="name">teapot.png</div></div>
+        <div class="card"><img src="./illustrations/teacup.png" alt="" /><div class="name">teacup.png</div></div>
+        <div class="card"><img src="./illustrations/leaf-sprig.png" alt="" /><div class="name">leaf-sprig.png</div></div>
+        <div class="card"><img src="./illustrations/flower-purple.png" alt="" /><div class="name">flower-purple.png</div></div>
+        <div class="card"><img src="./illustrations/berry-tart.png" alt="" /><div class="name">berry-tart.png</div></div>
+        <div class="card"><img src="./illustrations/candle.png" alt="" /><div class="name">candle.png</div></div>
+        <div class="card"><img src="./illustrations/cupcake.png" alt="" /><div class="name">cupcake.png</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Badges</h2>
+      <div class="grid">
+        <div class="card"><img src="./badges/badge-chatter.png" alt="" /><div class="name">badge-chatter.png</div></div>
+        <div class="card"><img src="./badges/badge-sharer.png" alt="" /><div class="name">badge-sharer.png</div></div>
+        <div class="card"><img src="./badges/badge-explorer.png" alt="" /><div class="name">badge-explorer.png</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>UI Elements</h2>
+      <div class="grid">
+        <div class="card"><img src="./ui/button-primary.png" alt="" /><div class="name">button-primary.png</div></div>
+        <div class="card"><img src="./ui/button-secondary.png" alt="" /><div class="name">button-secondary.png</div></div>
+        <div class="card"><img src="./ui/button-tertiary.png" alt="" /><div class="name">button-tertiary.png</div></div>
+        <div class="card"><img src="./ui/profile-bubble-card.png" alt="" /><div class="name">profile-bubble-card.png</div></div>
+        <div class="card"><img src="./ui/search-bar.png" alt="" /><div class="name">search-bar.png</div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Palette</h2>
+      <div class="palette">
+        <div class="swatch"><div class="swatch-color" style="background:#2E5A3D;"></div><div class="swatch-label">Forest<br>#2E5A3D</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#6E2C91;"></div><div class="swatch-label">Plum<br>#6E2C91</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#F28C1B;"></div><div class="swatch-label">Citrus<br>#F28C1B</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#F4EAD4;"></div><div class="swatch-label">Cream<br>#F4EAD4</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#D94E8F;"></div><div class="swatch-label">Berry<br>#D94E8F</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#09A7A7;"></div><div class="swatch-label">Teal<br>#09A7A7</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#8B5036;"></div><div class="swatch-label">Copper<br>#8B5036</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#1E1E1E;"></div><div class="swatch-label">Charcoal<br>#1E1E1E</div></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

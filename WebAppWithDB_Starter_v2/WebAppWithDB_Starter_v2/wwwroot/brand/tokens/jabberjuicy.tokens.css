@@ -1,0 +1,50 @@
+@import url("https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Lato:wght@400;500&display=swap");
+
+:root {
+  --jj-forest: #2e5a3d;
+  --jj-plum: #6e2c91;
+  --jj-citrus: #f28c1b;
+  --jj-cream: #f4ead4;
+  --jj-berry: #d94e8f;
+  --jj-teal: #09a7a7;
+  --jj-copper: #8b5036;
+  --jj-charcoal: #1e1e1e;
+
+  --jj-font-display: "Cinzel Decorative", Georgia, serif;
+  --jj-font-body: "Lato", "Helvetica Neue", Arial, sans-serif;
+
+  --jj-radius-sm: 12px;
+  --jj-radius-md: 20px;
+  --jj-radius-lg: 28px;
+
+  --jj-shadow-soft: 0 10px 30px rgba(30, 30, 30, 0.12);
+}
+
+body {
+  font-family: var(--jj-font-body);
+  color: var(--jj-charcoal);
+  background: var(--jj-cream);
+}
+
+.jj-display {
+  font-family: var(--jj-font-display);
+}
+
+.jj-button-primary {
+  background: var(--jj-plum);
+  color: #fff;
+  border-radius: var(--jj-radius-sm);
+}
+
+.jj-button-secondary {
+  background: #fff;
+  color: var(--jj-copper);
+  border: 1px solid rgba(139, 80, 54, 0.45);
+  border-radius: var(--jj-radius-sm);
+}
+
+.jj-button-tertiary {
+  background: var(--jj-forest);
+  color: #fff;
+  border-radius: var(--jj-radius-sm);
+}

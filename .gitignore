@@ -9,6 +9,9 @@ insert_sql.txt
 PROGRESS.md
 TODO.md
 
+# ─── Branding source images (large AI-generated PNGs) ────────
+Branding/Starter_Images/
+
 # ─── Course deliverables (not part of the app) ───────────────
 *.docx
 *.xlsx

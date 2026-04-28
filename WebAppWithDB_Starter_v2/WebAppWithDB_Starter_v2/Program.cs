@@ -52,9 +52,9 @@ namespace WebAppWithDB_Starter_v2
                 context.Response.Headers.ContentSecurityPolicy =
                     "default-src 'self';" +
                     "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://ajax.googleapis.com;" +
-                    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;" +
+                    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;" +
                     "img-src 'self' data:;" +
-                    "font-src 'self' https://cdn.jsdelivr.net data:;" +
+                    "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com data:;" +
                     "connect-src 'self';" +
                     "frame-ancestors 'none';" +
                     "base-uri 'self';" +
@@ -63,6 +63,7 @@ namespace WebAppWithDB_Starter_v2
                 await next(context);
             });
 
+            app.UseStaticFiles();
             app.UseSession();
             MapRoutes(app);
             app.Run();
@@ -117,11 +118,37 @@ namespace WebAppWithDB_Starter_v2
         rel='stylesheet'
         integrity='sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB'
         crossorigin='anonymous'>
+  <link rel='icon' href='/brand/favicons/favicon.ico' sizes='any'>
+  <link rel='icon' type='image/png' sizes='16x16' href='/brand/favicons/favicon-16x16.png'>
+  <link rel='icon' type='image/png' sizes='32x32' href='/brand/favicons/favicon-32x32.png'>
+  <link rel='apple-touch-icon' href='/brand/favicons/apple-touch-icon.png'>
+  <link rel='manifest' href='/brand/tokens/site.webmanifest'>
   <style>
     .jj-brand {{ font-family: Georgia, 'Times New Roman', serif; letter-spacing: 1px; }}
     .jj-hero  {{ background: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #16a34a 100%); }}
     .jj-nav   {{ background-color: #ea580c !important; }}
     body {{ background-color: #f8f9fa; }}
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Lato:wght@400;500&display=swap');
+    :root {{
+      --jj-forest: #2e5a3d;
+      --jj-plum: #6e2c91;
+      --jj-citrus: #f28c1b;
+      --jj-cream: #f4ead4;
+      --jj-berry: #d94e8f;
+      --jj-teal: #09a7a7;
+      --jj-copper: #8b5036;
+      --jj-charcoal: #1e1e1e;
+      --jj-font-display: 'Cinzel Decorative', Georgia, serif;
+      --jj-font-body: 'Lato', 'Helvetica Neue', Arial, sans-serif;
+      --jj-radius-sm: 12px;
+      --jj-radius-md: 20px;
+      --jj-radius-lg: 28px;
+      --jj-shadow-soft: 0 10px 30px rgba(30, 30, 30, 0.12);
+    }}
+    .jj-display {{ font-family: var(--jj-font-display); }}
+    .jj-button-primary {{ background: var(--jj-plum); color: #fff; border-radius: var(--jj-radius-sm); }}
+    .jj-button-secondary {{ background: #fff; color: var(--jj-copper); border: 1px solid rgba(139, 80, 54, 0.45); border-radius: var(--jj-radius-sm); }}
+    .jj-button-tertiary {{ background: var(--jj-forest); color: #fff; border-radius: var(--jj-radius-sm); }}
   </style>
 </head>
 <body>";
@@ -175,7 +202,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <nav class='navbar navbar-expand-lg jj-nav shadow-sm'>
   <div class='container'>
-    <a class='navbar-brand text-white fw-bold jj-brand fs-4' href='/'>JabberJuicy</a>
+    <a class='navbar-brand' href='/'><img src='/brand/logos/logo-horizontal-transparent.png' height='40' style='width:auto;' alt='JabberJuicy'></a>
     <button class='navbar-toggler border-light' type='button'
             data-bs-toggle='collapse' data-bs-target='#navMain'
             aria-controls='navMain' aria-expanded='false' aria-label='Toggle navigation'>
@@ -399,6 +426,7 @@ namespace WebAppWithDB_Starter_v2
             string body = @"
 <div class='jj-hero min-vh-100 d-flex align-items-center py-5'>
   <div class='container text-center text-white'>
+    <img src='/brand/logos/logo-primary-transparent.png' style='max-width:min(100%,480px);height:auto;display:block;margin:0 auto 1.5rem;' alt='JabberJuicy'>
     <h1 class='display-1 fw-bold jj-brand mb-2'>JabberJuicy</h1>
     <p class='lead fs-3 mb-1'>Curiously delicious. Frabjously fresh.</p>
     <p class='fs-5 fst-italic mb-5' style='color:#fde68a;'>&ldquo;'Twas brillig, and the slithy toves...&rdquo;</p>
@@ -950,6 +978,7 @@ namespace WebAppWithDB_Starter_v2
   <div class='text-center mb-5'>
     <h1 class='jj-brand display-4 fw-bold' style='color:#ea580c;'>Welcome, {H(username)}!</h1>
     <p class='lead text-muted fst-italic'>What shall the vorpal blade snicker-snack today?</p>
+    <img src='/brand/illustrations/mascot-dragon.png' height='180' style='width:auto;display:block;margin:0 auto 1rem;' alt='' class='d-none d-md-block'>
   </div>
   <div class='row g-4 justify-content-center'>
     <div class='col-sm-10 col-md-4'>
