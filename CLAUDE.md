@@ -83,13 +83,14 @@ The conceptual model (`Concept_drawing.drawio`, `Conceptual Design.drawio.png`) 
 | `_Deliverables/Admin_Dashboard_Wireframe.html` | Interactive HTML wireframe for admin dashboard |
 | `_Deliverables/Instruction_Manual.docx` | User's manual (in progress — Grayson) |
 | `WebAppWithDB_Starter_v2/` | ASP.NET Core Minimal API app (`Program.cs` + `DrinkQuotes.cs`) |
+| `WebAppWithDB_Starter_v2/.../wwwroot/brand/` | Static branding assets served by the app (logos, icons, favicons, illustrations, tokens) |
+| `Branding/web-assets/` | Source-of-truth branding asset package (logos, icons, illustrations, CSS tokens) |
+| `Scripts/remove_logo_white_fill.py` | Pillow script — surgically removes white fills from logo letterforms; re-runnable if logos are re-exported |
 | `LOCAL_DEV.md` | Local development quick-start |
 
 ## App Architecture
 
-Single-file ASP.NET Core Minimal API. All routes and handlers live in `Program.cs`. Business logic helpers (auth, cart, points, DB) are static private methods in the same `Program` class. `DrinkQuotes.cs` is the only other code file — a static dictionary mapping drink names to quotes.
-
-Single-file ASP.NET Core Minimal API. All routes, handlers, helpers, and the background service live in `Program.cs`. `DrinkQuotes.cs` is the only other code file.
+Single-file ASP.NET Core Minimal API. All routes, handlers, helpers, and the background service live in `Program.cs`. `DrinkQuotes.cs` is the only other code file — a static dictionary mapping drink names to quotes.
 
 **Background service:** `ExpiredOrderCleanupService` is a `private sealed class` nested inside `Program`, registered as an `IHostedService`. It runs on a 2-hour timer and auto-cancels stale pending orders.
 
@@ -136,7 +137,26 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 
 3. **Data dictionary missing new tables** — Same file needs new table entries for `JabberWonkTransaction` and the updated `Customer` schema, plus two new FK relationships on the PK-FK sheet.
 
-4. **Custom domain HTTPS** — `jabberjuicy.com` DNS resolves but Railway has not auto-provisioned the HTTPS cert for the apex domain. `www.jabberjuicy.com` may have the same issue. Check Railway → Settings → Networking after next deploy.
+4. **Custom domain HTTPS** — ✅ Resolved Apr 27. Both `jabberjuicy.com` and `www.jabberjuicy.com` are resolving with HTTPS. **On-campus note:** U of A campus network blocks newly registered domains — use `https://jabberjuicy-production.up.railway.app` when presenting on campus.
+
+## Session Notes (Apr 27, 2026) — Branding Integration
+
+- **Resolved:** Duplicate location rows in DB — manually deleted in SSMS. `MIN(LocationID)` workaround in checkout query is now a no-op.
+- **Resolved:** Custom domain — `jabberjuicy.com` and `www.jabberjuicy.com` both live with HTTPS. On-campus use Railway URL (U of A network blocks new domains).
+- **Added:** Static file serving — `app.UseStaticFiles()` added before `app.UseSession()` in `Program.cs`.
+- **Added:** `wwwroot/brand/` — full branding asset package (logos, icons, favicons, illustrations, badges, tokens, UI) copied from `Branding/web-assets/`.
+- **Added:** Favicon set + webmanifest link tags in `PageHead()`.
+- **Added:** Brand token CSS (`jabberjuicy.tokens.css`) inlined into `PageHead()` `<style>` block — defines `--jj-forest`, `--jj-plum`, `--jj-cream`, `--jj-citrus` etc. CSP updated for Google Fonts (`fonts.googleapis.com` / `fonts.gstatic.com`).
+- **Added:** `icon-round-color.png` (dragon head) + "JabberJuicy" text in navbar brand anchor.
+- **Added:** `logo-primary-transparent.png` in landing page hero (replaces redundant `<h1>` text).
+- **Added:** `mascot-dragon.png` illustration on authenticated home page (`d-none d-md-block`, 180px).
+- **Fixed:** Logo letterform white fills — two-pass Python Pillow approach:
+  - Pass 1: threshold `R/G/B >= 235` within text-only regions (primary: `y >= 255`; horizontal: `x >= 90`).
+  - Pass 2: proximity masking — near-white pixels (`R >= 200, G >= 195, B >= 185`) are made transparent only if a dark-green pixel (`~#2e5a3d`) exists within radius 15px, preserving dragon highlights.
+  - Script saved to `Scripts/remove_logo_white_fill.py` with full documentation; re-runnable after any Canva re-export.
+- **Gotcha documented:** CSS embedded in C# `$@"..."` verbatim strings must use single quotes for all CSS string values (`url('...')`, font-family names, etc.) — double quotes prematurely close the C# string literal.
+- **Added:** `Scripts/` folder — home for project utility scripts.
+- **Gitignore:** Added `Branding/Starter_Images/` (large AI-generated source PNGs, 32 MB) and `Branding/web-assets-v2/` (stray sub-agent artifact).
 
 ## Session Notes (Apr 24, 2026) — Session 2: Admin Code Review + Fixes
 
@@ -162,13 +182,17 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 - **Added:** JWP points refund on order cancellation. `HandlePickupCancel` now checks if the cancelled order was paid with JabberWonk Points; if so, it looks up the original `REDEEM` transaction, restores the exact points to `CUS_PointsBalance`, and logs a `REFUND` entry in `JabberWonkTransaction`.
 - Both fixes pushed to `origin/main` (commit `372cdaf`) and deployed to Railway.
 
-## What's Next (Phase 3 Remaining)
+## What's Next (Final Phase, Apr 28–30)
 
-- [ ] **Commit & push all Apr 24 changes** — `Program.cs` has uncommitted changes (background service, earn cap, admin module, code-review fixes). All moved/new support files also need staging.
-- [x] **Apply admin DB schema to live DB** — `admin_db_sql.txt` applied and tested as of Apr 24. All 5 admin tables live and verified.
-- [ ] SQL Queries deliverable (Grayson & Andrew) — analytical queries against the live DB
-- [ ] User's Manual (Grayson) — `_Deliverables/Instruction_Manual.docx` drafted; needs review
-- [ ] Update `Echo_Data_Dictionary.xlsx` with new schema changes (add `REFUND` transaction type, `CUS_PointsBalance`, `JabberWonkTransaction` table, JWP earn cap rule, 5 new admin tables)
-- [x] Fix duplicate location rows in DB — manually resolved in DB (Apr 27)
-- [ ] Test full end-to-end flow on live Railway deployment after Phase 3 push — include admin login at `/admin/login`
-- [ ] Prepare presentation (all members, Apr 28–30)
+- [x] All Apr 24 changes committed and pushed
+- [x] Admin DB schema applied to live DB — all 5 admin tables live
+- [x] Duplicate location rows resolved
+- [x] Custom domain live with HTTPS
+- [x] Branding assets integrated into app (favicons, logos, mascot, CSS tokens)
+- [ ] **Verify branding on live Railway deployment** — check logo white-fill removal looks correct on orange navbar and hero gradient; confirm mascot dragon renders on home page
+- [ ] **SQL Queries deliverable** (Grayson & Andrew) — analytical queries against the live DB
+- [ ] **User's Manual** (Grayson) — `_Deliverables/Instruction_Manual.docx` needs final review
+- [ ] **Update `Echo_Data_Dictionary.xlsx`** — add `REFUND` transaction type, `CUS_PointsBalance`, `JabberWonkTransaction` table, JWP earn cap rule, 5 new admin tables
+- [ ] **Presentation** (all members, Apr 28–30)
+- [ ] **Peer evaluation** (Apr 28–30)
+- [ ] **All deliverables submitted**
