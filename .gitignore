@@ -13,6 +13,9 @@ TODO.md
 Branding/Starter_Images/
 Branding/web-assets-v2/
 
+# ─── Scripts whose output is gitignored ──────────────────────
+Scripts/build_sql_queries_doc.py
+
 # ─── Course deliverables (not part of the app) ───────────────
 _Deliverables/
 *.docx

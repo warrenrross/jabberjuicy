@@ -86,6 +86,7 @@ The conceptual model (`Concept_drawing.drawio`, `Conceptual Design.drawio.png`) 
 | `WebAppWithDB_Starter_v2/.../wwwroot/brand/` | Static branding assets served by the app (logos, icons, favicons, illustrations, tokens) |
 | `Branding/web-assets/` | Source-of-truth branding asset package (logos, icons, illustrations, CSS tokens) |
 | `Scripts/remove_logo_white_fill.py` | Pillow script — surgically removes white fills from logo letterforms; re-runnable if logos are re-exported |
+| `Scripts/build_sql_queries_doc.py` | Generates `_Deliverables/JabberJuicy_SQL_Queries.docx`; gitignored (output is gitignored) |
 | `LOCAL_DEV.md` | Local development quick-start |
 
 ## App Architecture
@@ -139,6 +140,14 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 
 4. **Custom domain HTTPS** — ✅ Resolved Apr 27. Both `jabberjuicy.com` and `www.jabberjuicy.com` are resolving with HTTPS. **On-campus note:** U of A campus network blocks newly registered domains — use `https://jabberjuicy-production.up.railway.app` when presenting on campus.
 
+## Session Notes (Apr 27, 2026) — Session 2: SQL Queries Doc + Gitignore Policy
+
+- **Created:** `_Deliverables/JabberJuicy_SQL_Queries.docx` — reference document containing all 32 parameterized SQL queries from `Program.cs`, organized into 13 sections by feature area. Each query includes a brief explanation of its purpose and any architectural notes (e.g. why `OUTPUT DELETED` is used, why `MIN(LocationID)` exists, how the 24-hour live-order window works).
+- **Created:** `Scripts/build_sql_queries_doc.py` — python-docx script that generates the above `.docx`. Re-runnable if queries change.
+- **Gitignore policy established:** Scripts whose output is gitignored should themselves be gitignored. Applied to `build_sql_queries_doc.py` (output goes to `_Deliverables/` which is already gitignored). `remove_logo_white_fill.py` stays committed because its output (logo PNGs in `wwwroot/`) is committed.
+- **Clarified:** Admin live order queue shows all `Pending` orders regardless of age, plus `Completed`/`Cancelled` orders from the last 24 hours (`DATEADD(DAY, -1, GETDATE())`). A 650-minute Completed order appearing is correct behavior.
+- **Updated:** `_Deliverables/Instruction_Manual.docx` — added Section 12 (Admin Dashboard, subsections 12.1–12.6); removed numbered prefixes from admin section titles; added `/admin/login` and `/admin` to Quick Navigation Reference table. No login credentials included.
+
 ## Session Notes (Apr 27, 2026) — Branding Integration
 
 - **Resolved:** Duplicate location rows in DB — manually deleted in SSMS. `MIN(LocationID)` workaround in checkout query is now a no-op.
@@ -189,9 +198,11 @@ Constants are defined at the top of `Program.cs`: `JWP_PointsPerVisit`, `JWP_Poi
 - [x] Duplicate location rows resolved
 - [x] Custom domain live with HTTPS
 - [x] Branding assets integrated into app (favicons, logos, mascot, CSS tokens)
+- [x] App-layer SQL query reference doc created (`_Deliverables/JabberJuicy_SQL_Queries.docx`, gitignored — regenerate with `python3 Scripts/build_sql_queries_doc.py`)
+- [x] Admin Dashboard section added to Instruction Manual (Section 12, no credentials)
 - [ ] **Verify branding on live Railway deployment** — check logo white-fill removal looks correct on orange navbar and hero gradient; confirm mascot dragon renders on home page
-- [ ] **SQL Queries deliverable** (Grayson & Andrew) — analytical queries against the live DB
-- [ ] **User's Manual** (Grayson) — `_Deliverables/Instruction_Manual.docx` needs final review
+- [ ] **SQL Queries deliverable** (Grayson & Andrew) — analytical queries against the live DB (separate from the app-layer reference doc above)
+- [ ] **User's Manual final review** (Grayson) — `_Deliverables/Instruction_Manual.docx`
 - [ ] **Update `Echo_Data_Dictionary.xlsx`** — add `REFUND` transaction type, `CUS_PointsBalance`, `JabberWonkTransaction` table, JWP earn cap rule, 5 new admin tables
 - [ ] **Presentation** (all members, Apr 28–30)
 - [ ] **Peer evaluation** (Apr 28–30)
