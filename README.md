@@ -2,7 +2,8 @@
 
 > *'Twas brillig, and the slithy toves did gyre and gimble in the wabe...*
 
-A full-stack juice bar ordering application built for **Echo Team** — DASC Data Management, Spring 2026.
+A full-stack juice bar ordering application demo.
+[View jabberjuicy.com](https://jabberjuicy.com/) 
 
 ---
 
@@ -14,7 +15,7 @@ The name, the menu items, the store addresses, and half the copy on the pages ar
 
 ---
 
-## Team — Echo
+## The Team
 
 | Name | Role |
 |---|---|
