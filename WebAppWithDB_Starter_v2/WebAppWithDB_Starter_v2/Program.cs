@@ -3016,7 +3016,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <div class='card admin-card'>
   <div class='card-body'>
-    <div class='section-title mb-3'>1. Customer Lookup and Case Workspace</div>
+    <div class='section-title mb-3'>Customer Lookup and Case Workspace</div>
     <div class='small text-muted mb-3'>Search for a customer, review their account, and use this panel as the starting point for service issues.</div>
     {results}
     {detailHtml}
@@ -3032,7 +3032,7 @@ namespace WebAppWithDB_Starter_v2
                 return @"
 <div class='card admin-card'>
   <div class='card-body'>
-    <div class='section-title mb-3'>2. JabberWonk Points Manager</div>
+    <div class='section-title mb-3'>JabberWonk Points Manager</div>
     <div class='alert alert-light border mb-0'>Select a customer to inspect loyalty history and points behavior.</div>
   </div>
 </div>";
@@ -3066,7 +3066,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <div class='card admin-card'>
   <div class='card-body'>
-    <div class='section-title mb-3'>2. JabberWonk Points Manager</div>
+    <div class='section-title mb-3'>JabberWonk Points Manager</div>
     {adjAlert}
     <div class='d-flex justify-content-between align-items-center mb-3'>
       <div>
@@ -3132,7 +3132,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <div class='card admin-card'>
   <div class='card-body'>
-    <div class='section-title mb-3'>3. Live Order Queue</div>
+    <div class='section-title mb-3'>Live Order Queue</div>
     <div class='table-responsive'>
       <table class='table align-middle mb-0'>
         <thead><tr><th>Order</th><th>Customer</th><th>Location</th><th>Status</th><th>Age</th></tr></thead>
@@ -3175,7 +3175,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <div class='card admin-card'>
   <div class='card-body'>
-    <div class='section-title mb-3'>4. Sales Trend</div>
+    <div class='section-title mb-3'>Sales Trend</div>
     <div class='small text-muted mb-3'>Current view: {H(grain.ToUpperInvariant())}</div>
     {rows}
   </div>
@@ -3209,7 +3209,7 @@ namespace WebAppWithDB_Starter_v2
 <div class='card admin-card'>
   <div class='card-body'>
     <div class='d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3'>
-      <div class='section-title mb-0'>5. Recent Activity Feed</div>
+      <div class='section-title mb-0'>Recent Activity Feed</div>
       <div class='small text-muted'>Newest activity first. Scroll for older entries.</div>
     </div>
     <div class='activity-scroll'>
@@ -3244,7 +3244,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <div class='card admin-card'>
   <div class='card-body'>
-    <div class='section-title mb-3'>6. Most Popular Items</div>
+    <div class='section-title mb-3'>Most Popular Items</div>
     {rows}
   </div>
 </div>";
@@ -3286,7 +3286,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <div class='card admin-card'>
   <div class='card-body'>
-    <div class='section-title mb-3'>7. Payment and Loyalty Mix</div>
+    <div class='section-title mb-3'>Payment and Loyalty Mix</div>
     {paymentRows}
     <div class='row g-2'>
       <div class='col-4'><div class='subtle-box p-2'><div class='mini-label'>Earned</div><div class='fw-bold'>{earned:N0}</div></div></div>
@@ -3329,7 +3329,7 @@ namespace WebAppWithDB_Starter_v2
   <div class='card-body'>
     <div class='d-flex justify-content-between align-items-start gap-2 mb-3'>
       <div>
-        <div class='section-title'>8. Store Performance by Location</div>
+        <div class='section-title'>Store Performance by Location</div>
         <div class='small text-muted'>Revenue and operational output over the last 7 days. {(isGlobal ? "Global comparison view." : "Scoped to this admin's store access.")}</div>
       </div>
       <span class='badge text-bg-light'>Avg pickup completion time needs a dedicated completion timestamp</span>
