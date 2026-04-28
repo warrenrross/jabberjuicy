@@ -202,7 +202,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <nav class='navbar navbar-expand-lg jj-nav shadow-sm'>
   <div class='container'>
-    <a class='navbar-brand' href='/'><img src='/brand/logos/logo-horizontal-transparent.png' height='40' style='width:auto;' alt='JabberJuicy'></a>
+    <a class='navbar-brand' href='/'><img src='/brand/icons/icon-round-color.png' height='40' style='width:auto;' alt='JabberJuicy'></a>
     <button class='navbar-toggler border-light' type='button'
             data-bs-toggle='collapse' data-bs-target='#navMain'
             aria-controls='navMain' aria-expanded='false' aria-label='Toggle navigation'>
