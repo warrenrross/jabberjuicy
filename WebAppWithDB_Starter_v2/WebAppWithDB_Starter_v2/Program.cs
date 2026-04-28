@@ -202,7 +202,7 @@ namespace WebAppWithDB_Starter_v2
             return $@"
 <nav class='navbar navbar-expand-lg jj-nav shadow-sm'>
   <div class='container'>
-    <a class='navbar-brand' href='/'><img src='/brand/icons/icon-round-color.png' height='40' style='width:auto;' alt='JabberJuicy'></a>
+    <a class='navbar-brand d-flex align-items-center gap-2' href='/'><img src='/brand/icons/icon-round-color.png' height='40' style='width:auto;' alt='JabberJuicy'><span class='text-white fw-bold fs-4 jj-brand'>JabberJuicy</span></a>
     <button class='navbar-toggler border-light' type='button'
             data-bs-toggle='collapse' data-bs-target='#navMain'
             aria-controls='navMain' aria-expanded='false' aria-label='Toggle navigation'>
@@ -427,7 +427,6 @@ namespace WebAppWithDB_Starter_v2
 <div class='jj-hero min-vh-100 d-flex align-items-center py-5'>
   <div class='container text-center text-white'>
     <img src='/brand/logos/logo-primary-transparent.png' style='max-width:min(100%,480px);height:auto;display:block;margin:0 auto 1.5rem;' alt='JabberJuicy'>
-    <h1 class='display-1 fw-bold jj-brand mb-2'>JabberJuicy</h1>
     <p class='lead fs-3 mb-1'>Curiously delicious. Frabjously fresh.</p>
     <p class='fs-5 fst-italic mb-5' style='color:#fde68a;'>&ldquo;'Twas brillig, and the slithy toves...&rdquo;</p>
     <div class='row justify-content-center g-4 mb-5'>
